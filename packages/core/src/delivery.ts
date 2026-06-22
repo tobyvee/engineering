@@ -27,6 +27,22 @@ export interface FileChange {
   content: string
 }
 
+export type DeployState = "pending" | "success" | "failure"
+
+export interface DeploymentRun {
+  id: number
+  url: string
+  state: DeployState
+}
+
+export interface DispatchDeployArgs {
+  /** Workflow file name or numeric id (e.g. "deploy.yml"). */
+  workflow: string
+  /** Git ref to deploy (branch or SHA). */
+  ref: string
+  inputs?: Record<string, string>
+}
+
 export interface DeliveryAdapter {
   createBranch(base: string, name: string): Promise<void>
   /** Commit `files` onto `branch` (create/overwrite) and return the new commit SHA. */
@@ -34,4 +50,12 @@ export interface DeliveryAdapter {
   openPullRequest(args: OpenPullRequestArgs): Promise<PullRequestRef>
   getChecks(pr: PullRequestRef): Promise<CheckStatus[]>
   merge(pr: PullRequestRef): Promise<void>
+  /** Trigger a GitHub Actions deploy via workflow_dispatch (fire-and-forget; returns no run id). */
+  dispatchWorkflow(args: DispatchDeployArgs): Promise<void>
+  /** Latest workflow_dispatch run for `workflow` on `ref` created at/after `since` (null if none). */
+  latestDeploymentRun(args: {
+    workflow: string
+    ref: string
+    since: string
+  }): Promise<DeploymentRun | null>
 }

@@ -19,7 +19,7 @@ export function Board() {
     onSuccess: invalidate,
   })
   const approve = useMutation({
-    mutationFn: (id: string) => api.approveTicket(id),
+    mutationFn: ({ id, gate }: { id: string; gate: "merge" | "deploy" }) => api.approve(id, gate),
     onSuccess: invalidate,
   })
 
@@ -65,10 +65,20 @@ export function Board() {
                   <button
                     className="btn approve"
                     type="button"
-                    onClick={() => approve.mutate(t.id)}
+                    onClick={() => approve.mutate({ id: t.id, gate: "merge" })}
                     disabled={approve.isPending}
                   >
                     Approve
+                  </button>
+                )}
+                {t.status === "deploying" && (
+                  <button
+                    className="btn approve"
+                    type="button"
+                    onClick={() => approve.mutate({ id: t.id, gate: "deploy" })}
+                    disabled={approve.isPending}
+                  >
+                    Approve deploy
                   </button>
                 )}
               </div>

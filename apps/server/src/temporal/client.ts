@@ -28,9 +28,9 @@ export async function startTicketLifecycle(ticketId: string): Promise<void> {
   })
 }
 
-/** Release the approval gate by signaling the running workflow (invariant #4). */
-export async function approveTicket(ticketId: string): Promise<void> {
+/** Release an approval gate ("merge" or "deploy") by signaling the running workflow (invariant #4). */
+export async function approveTicket(ticketId: string, gate: "merge" | "deploy"): Promise<void> {
   const client = await getTemporalClient()
   const handle = client.workflow.getHandle(ticketWorkflowId(ticketId))
-  await handle.signal("approve", true)
+  await handle.signal("approve", gate)
 }

@@ -31,9 +31,12 @@ app.post("/api/tickets/:id/start", async (c) => {
   return c.json({ ticketId: id, started: true })
 })
 
-// Human approval gate (invariant #4): signal the durable workflow to release its wait.
+// Human approval gates (invariant #4): release a durable wait. `gate` selects which one —
+// "merge" (the review/merge gate, default) or "deploy" (the ship gate).
 app.post("/api/tickets/:id/approve", async (c) => {
   const id = c.req.param("id")
-  await approveTicket(id)
-  return c.json({ ticketId: id, signaled: true })
+  const body = (await c.req.json().catch(() => ({}))) as { gate?: "merge" | "deploy" }
+  const gate = body.gate === "deploy" ? "deploy" : "merge"
+  await approveTicket(id, gate)
+  return c.json({ ticketId: id, gate, signaled: true })
 })

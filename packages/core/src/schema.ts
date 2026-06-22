@@ -36,6 +36,7 @@ export const TicketStatus = z.enum([
   "planned",
   "in_progress",
   "in_review",
+  "deploying",
   "blocked",
   "done",
 ])

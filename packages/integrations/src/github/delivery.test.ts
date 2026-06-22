@@ -123,4 +123,70 @@ describe("GitHubDeliveryAdapter", () => {
       sha: "new-commit",
     })
   })
+
+  it("dispatches a deploy workflow", async () => {
+    const createWorkflowDispatch = vi.fn().mockResolvedValue({ data: {} })
+
+    await adapterWith({ actions: { createWorkflowDispatch } }).dispatchWorkflow({
+      workflow: "deploy.yml",
+      ref: "main",
+      inputs: { ticket: "t1" },
+    })
+
+    expect(createWorkflowDispatch).toHaveBeenCalledWith({
+      owner: "acme",
+      repo: "widgets",
+      workflow_id: "deploy.yml",
+      ref: "main",
+      inputs: { ticket: "t1" },
+    })
+  })
+
+  it("finds the latest deploy run and maps its state", async () => {
+    const listWorkflowRuns = vi.fn().mockResolvedValue({
+      data: {
+        workflow_runs: [
+          {
+            id: 99,
+            html_url: "https://github.com/acme/widgets/actions/runs/99",
+            status: "completed",
+            conclusion: "success",
+          },
+        ],
+      },
+    })
+
+    const run = await adapterWith({ actions: { listWorkflowRuns } }).latestDeploymentRun({
+      workflow: "deploy.yml",
+      ref: "main",
+      since: "2026-06-22T00:00:00Z",
+    })
+
+    expect(run).toEqual({
+      id: 99,
+      url: "https://github.com/acme/widgets/actions/runs/99",
+      state: "success",
+    })
+    expect(listWorkflowRuns).toHaveBeenCalledWith({
+      owner: "acme",
+      repo: "widgets",
+      workflow_id: "deploy.yml",
+      event: "workflow_dispatch",
+      branch: "main",
+      created: ">=2026-06-22T00:00:00Z",
+      per_page: 1,
+    })
+  })
+
+  it("returns null when no deploy run exists yet", async () => {
+    const listWorkflowRuns = vi.fn().mockResolvedValue({ data: { workflow_runs: [] } })
+
+    const run = await adapterWith({ actions: { listWorkflowRuns } }).latestDeploymentRun({
+      workflow: "deploy.yml",
+      ref: "main",
+      since: "x",
+    })
+
+    expect(run).toBeNull()
+  })
 })

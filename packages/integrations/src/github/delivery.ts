@@ -2,6 +2,9 @@ import type {
   CheckState,
   CheckStatus,
   DeliveryAdapter,
+  DeploymentRun,
+  DeployState,
+  DispatchDeployArgs,
   FileChange,
   OpenPullRequestArgs,
   PullRequestRef,
@@ -98,6 +101,39 @@ export class GitHubDeliveryAdapter implements DeliveryAdapter {
       pull_number: pr.number,
     })
   }
+
+  async dispatchWorkflow(args: DispatchDeployArgs): Promise<void> {
+    await this.octokit.rest.actions.createWorkflowDispatch({
+      ...this.repo,
+      workflow_id: args.workflow,
+      ref: args.ref,
+      inputs: args.inputs,
+    })
+  }
+
+  async latestDeploymentRun(args: {
+    workflow: string
+    ref: string
+    since: string
+  }): Promise<DeploymentRun | null> {
+    const { data } = await this.octokit.rest.actions.listWorkflowRuns({
+      ...this.repo,
+      workflow_id: args.workflow,
+      event: "workflow_dispatch",
+      branch: args.ref,
+      created: `>=${args.since}`,
+      per_page: 1,
+    })
+    const run = data.workflow_runs[0]
+    if (!run) return null
+    return { id: run.id, url: run.html_url, state: toDeployState(run.status, run.conclusion) }
+  }
+}
+
+/** Collapse a workflow run's status + conclusion into our three-state deploy model. */
+function toDeployState(status: string | null, conclusion: string | null): DeployState {
+  if (status !== "completed") return "pending"
+  return conclusion === "success" ? "success" : "failure"
 }
 
 /** Collapse a GitHub check-run's status + conclusion into our three-state model. */

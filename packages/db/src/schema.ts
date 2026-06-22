@@ -11,6 +11,7 @@ export const ticketStatus = pgEnum("ticket_status", [
   "planned",
   "in_progress",
   "in_review",
+  "deploying",
   "blocked",
   "done",
 ])

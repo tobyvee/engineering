@@ -9,8 +9,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 > appended to the audit log, with the Mission→Goal→Epic chain seeded for traceability. The
 > implementation step (`implementTicket`) runs a coding agent (`ClaudeWorker` — Anthropic API or
 > `claude -p` CLI) that proposes file changes; these are committed to a ticket branch via the GitHub
-> Git Data API and opened as a PR, then CI is polled and the PR merged on approval — all a no-op when
-> GitHub isn't configured. Remaining: an actual deploy step.
+> Git Data API and opened as a PR, then CI is polled and the PR merged on approval. After merge a
+> second human gate (ship) dispatches a GitHub Actions deploy (`workflow_dispatch`) and polls the run
+> to completion. Delivery + deploy are a no-op when unconfigured; both gates are human approvals. The
+> full lifecycle is implemented — a true end-to-end run just needs an `ANTHROPIC_API_KEY` + a GitHub
+> repo/token/deploy workflow.
 > Sections marked _(target)_ describe intended behavior not yet wired; the "Decisions" section tracks
 > what is settled vs. still open.
 
@@ -122,7 +125,7 @@ approves" — i.e. durable execution. **Chosen: Temporal.** Evaluated options (a
 
 ### Delivery loop (hybrid)
 
-Ticket lifecycle: `backlog → planned → in_progress → in_review → done | blocked`.
+Ticket lifecycle: `backlog → planned → in_progress → in_review → deploying → done | blocked`.
 
 Build the full loop's *interface* now, ship *coordination* first. A `DeliveryAdapter` abstracts the
 git host, CI, and issue tracker; the **first implementation targets GitHub** (PRs, checks/Actions, and
@@ -130,7 +133,8 @@ GitHub Issues/Projects as the likely initial tracker). Plan/assign/track/report 
 `ticket → branch/PR → CI → review → merge` path is **now wired in the Temporal `ticketLifecycle`
 workflow** behind the adapter (the activities build it from `GITHUB_*` env and no-op when unset);
 the coding agent now writes file changes that are committed to the branch (Git Data API) before the
-PR opens; an actual deploy step remains — all without reworking `core`.
+PR opens, and a human-gated deploy dispatches a GitHub Actions workflow (`workflow_dispatch`) on the
+ship step, polling the run to completion — all without reworking `core`.
 
 ## Key invariants (the "big picture" that spans files)
 

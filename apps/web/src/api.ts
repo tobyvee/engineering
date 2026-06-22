@@ -24,5 +24,6 @@ export const api = {
   audit: () => getJson<{ events: AuditEvent[] }>("/api/audit").then((r) => r.events),
   createTicket: (title: string) => postJson<{ ticket: Ticket }>("/api/tickets", { title }),
   startTicket: (id: string) => postJson<{ started: boolean }>(`/api/tickets/${id}/start`),
-  approveTicket: (id: string) => postJson<{ signaled: boolean }>(`/api/tickets/${id}/approve`),
+  approve: (id: string, gate: "merge" | "deploy") =>
+    postJson<{ signaled: boolean }>(`/api/tickets/${id}/approve`, { gate }),
 }

@@ -1,5 +1,11 @@
 import { proposeFileChanges } from "@eng/agents"
-import { type DeliveryAdapter, type PullRequestRef, ROLES, type TicketStatus } from "@eng/core"
+import {
+  type DeliveryAdapter,
+  type DeployState,
+  type PullRequestRef,
+  ROLES,
+  type TicketStatus,
+} from "@eng/core"
 import { appendAudit, getTicket, getTraceContext, setTicketStatus } from "@eng/db"
 import { createGitHubDelivery } from "@eng/integrations"
 
@@ -23,6 +29,8 @@ function deliveryFromEnv(): DeliveryAdapter | null {
 }
 
 const BASE_BRANCH = process.env.GITHUB_BASE_BRANCH ?? "main"
+const DEPLOY_WORKFLOW = process.env.GITHUB_DEPLOY_WORKFLOW
+const DEPLOY_REF = process.env.GITHUB_DEPLOY_REF ?? BASE_BRANCH
 
 /**
  * The implementation step: a Staff Engineer agent writes the code, then — if GitHub is configured —
@@ -146,4 +154,64 @@ export async function mergeDelivery(ticketId: string, pr: PullRequestRef): Promi
       payload: { number: pr.number, error: String(err) },
     })
   }
+}
+
+// --- Deploy (GitHub Actions workflow_dispatch) -------------------------------
+
+/** Trigger a deploy via workflow_dispatch. Returns the dispatch time (for run lookup) or null. */
+export async function startDeploy(ticketId: string): Promise<string | null> {
+  const delivery = deliveryFromEnv()
+  if (!delivery || !DEPLOY_WORKFLOW) {
+    await appendAudit({
+      actor: "system",
+      kind: "deploy_skipped",
+      ticketId,
+      payload: { reason: !delivery ? "GitHub not configured" : "no deploy workflow configured" },
+    })
+    return null
+  }
+  const since = new Date().toISOString()
+  try {
+    await delivery.dispatchWorkflow({
+      workflow: DEPLOY_WORKFLOW,
+      ref: DEPLOY_REF,
+      inputs: { ticket: ticketId },
+    })
+    await appendAudit({
+      actor: "lead_engineer",
+      kind: "deploy_dispatched",
+      ticketId,
+      payload: { workflow: DEPLOY_WORKFLOW, ref: DEPLOY_REF },
+    })
+    return since
+  } catch (err) {
+    await appendAudit({
+      actor: "system",
+      kind: "deploy_error",
+      ticketId,
+      payload: { error: String(err) },
+    })
+    return null
+  }
+}
+
+/** Find the dispatched run's status. `pending` until it appears and completes. */
+export async function checkDeployStatus(since: string): Promise<DeployState> {
+  const delivery = deliveryFromEnv()
+  if (!delivery || !DEPLOY_WORKFLOW) return "success"
+  const run = await delivery.latestDeploymentRun({
+    workflow: DEPLOY_WORKFLOW,
+    ref: DEPLOY_REF,
+    since,
+  })
+  return run?.state ?? "pending"
+}
+
+export async function recordDeploy(ticketId: string, state: DeployState): Promise<void> {
+  await appendAudit({
+    actor: "lead_engineer",
+    kind: state === "success" ? "deployed" : "deploy_failed",
+    ticketId,
+    payload: { state },
+  })
 }

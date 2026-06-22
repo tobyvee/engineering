@@ -8,6 +8,13 @@
       "when": 1782091446539,
       "tag": "0000_sticky_karnak",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1782095640600,
+      "tag": "0001_workable_venus",
+      "breakpoints": true
     }
   ]
 }

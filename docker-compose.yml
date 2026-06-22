@@ -99,6 +99,8 @@ services:
       GITHUB_OWNER: ${GITHUB_OWNER:-}
       GITHUB_REPO: ${GITHUB_REPO:-}
       GITHUB_BASE_BRANCH: ${GITHUB_BASE_BRANCH:-main}
+      GITHUB_DEPLOY_WORKFLOW: ${GITHUB_DEPLOY_WORKFLOW:-}
+      GITHUB_DEPLOY_REF: ${GITHUB_DEPLOY_REF:-main}
     command: ["pnpm", "--filter", "@eng/server", "worker"]
 
   web:
