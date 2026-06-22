@@ -1,16 +1,23 @@
-import type { KnowledgeBase, NewTicket } from "@eng/core"
+import type { NewTicket } from "@eng/core"
 import type { Octokit } from "octokit"
 import { describe, expect, it, vi } from "vitest"
+import type { GitHubHierarchy } from "./hierarchy"
 import { GitHubIssueTracker } from "./issues"
 
 const repo = { owner: "acme", repo: "widgets" }
-const noopKnowledge: KnowledgeBase = {
-  read: async () => null,
-  write: async () => {},
-  list: async () => [],
+
+function makeHierarchy(): GitHubHierarchy {
+  return {
+    ensureSeedEpicId: vi.fn(async () => "7"),
+    attachTicket: vi.fn(async () => {}),
+  } as unknown as GitHubHierarchy
 }
-function trackerWith(issues: Record<string, unknown>): GitHubIssueTracker {
-  return new GitHubIssueTracker({ rest: { issues } } as unknown as Octokit, repo, noopKnowledge)
+
+function trackerWith(
+  issues: Record<string, unknown>,
+  hierarchy: GitHubHierarchy = makeHierarchy(),
+): GitHubIssueTracker {
+  return new GitHubIssueTracker({ rest: { issues } } as unknown as Octokit, repo, hierarchy)
 }
 
 const newTicket: NewTicket = {
@@ -24,12 +31,20 @@ const newTicket: NewTicket = {
 }
 
 describe("GitHubIssueTracker", () => {
-  it("creates an issue with metadata + labels and maps it back", async () => {
+  it("creates an issue, maps it back, and links it under its epic as a sub-issue", async () => {
     const create = vi.fn().mockImplementation(async (args) => ({
-      data: { number: 12, title: args.title, body: args.body, created_at: "t0", updated_at: "t0" },
+      data: {
+        number: 12,
+        id: 999,
+        title: args.title,
+        body: args.body,
+        created_at: "t0",
+        updated_at: "t0",
+      },
     }))
+    const hierarchy = makeHierarchy()
 
-    const ticket = await trackerWith({ create }).createTicket(newTicket)
+    const ticket = await trackerWith({ create }, hierarchy).createTicket(newTicket)
 
     expect(ticket).toEqual({
       id: "gh-12",
@@ -49,6 +64,31 @@ describe("GitHubIssueTracker", () => {
         body: expect.stringContaining("eng-ticket"),
       }),
     )
+    // The new issue (database id 999) is linked under epic "epic-1".
+    expect(hierarchy.attachTicket).toHaveBeenCalledWith("epic-1", 999)
+  })
+
+  it("seeds an epic via the hierarchy when the ticket has none", async () => {
+    const create = vi.fn().mockImplementation(async (args) => ({
+      data: {
+        number: 12,
+        id: 999,
+        title: args.title,
+        body: args.body,
+        created_at: "t0",
+        updated_at: "t0",
+      },
+    }))
+    const hierarchy = makeHierarchy()
+
+    const ticket = await trackerWith({ create }, hierarchy).createTicket({
+      ...newTicket,
+      epicId: "",
+    })
+
+    expect(hierarchy.ensureSeedEpicId).toHaveBeenCalled()
+    expect(ticket.epicId).toBe("7")
+    expect(hierarchy.attachTicket).toHaveBeenCalledWith("7", 999)
   })
 
   it("round-trips domain fields through the body and filters out PRs on list", async () => {

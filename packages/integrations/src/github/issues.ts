@@ -1,6 +1,5 @@
 import type {
   IssueTracker,
-  KnowledgeBase,
   LifecycleStage,
   NewTicket,
   RoleId,
@@ -8,7 +7,7 @@ import type {
   TicketStatus,
 } from "@eng/core"
 import type { Octokit } from "octokit"
-import { ensureSeedEpicId } from "./hierarchy"
+import type { GitHubHierarchy } from "./hierarchy"
 
 /** Our domain fields that GitHub Issues don't model natively are round-tripped in a metadata block. */
 interface TicketMeta {
@@ -92,11 +91,11 @@ export class GitHubIssueTracker implements IssueTracker {
   constructor(
     private readonly octokit: Octokit,
     private readonly repo: { owner: string; repo: string },
-    private readonly knowledge: KnowledgeBase,
+    private readonly hierarchy: GitHubHierarchy,
   ) {}
 
   async createTicket(input: NewTicket): Promise<Ticket> {
-    const epicId = input.epicId || (await ensureSeedEpicId(this.knowledge))
+    const epicId = input.epicId || (await this.hierarchy.ensureSeedEpicId())
     const meta: TicketMeta = {
       epicId,
       status: input.status,
@@ -110,6 +109,8 @@ export class GitHubIssueTracker implements IssueTracker {
       body: renderBody(input.description, meta),
       labels: [`status:${input.status}`, `stage:${input.stage}`],
     })
+    // Link the ticket as a native sub-issue of its epic (parent chain → trace context).
+    await this.hierarchy.attachTicket(epicId, data.id)
     return toTicket(data)
   }
 

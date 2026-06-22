@@ -1,60 +1,113 @@
-import type { Hierarchy, IssueTracker, KnowledgeBase } from "@eng/core"
+import type { Hierarchy } from "@eng/core"
+import type { Octokit } from "octokit"
 
-const HIERARCHY_PATH = "hierarchy.json"
-
-/** The mission→goal→epic tree, stored as a versioned repo doc; tickets (issues) reference an epic. */
-interface HierarchyDoc {
-  mission: { title: string; statement: string }
-  goals: Record<string, { title: string; description: string }>
-  epics: Record<string, { title: string; goalId: string }>
+function issueNumber(id: string): number {
+  return Number(id.replace(/^gh-/, ""))
 }
 
-const DEFAULT_DOC: HierarchyDoc = {
-  mission: { title: "Deliver the product", statement: "Ship value to users." },
-  goals: { "goal-1": { title: "Bootstrap the unit", description: "Stand up delivery." } },
-  epics: { "epic-1": { title: "Vertical slice", goalId: "goal-1" } },
+function status(err: unknown): number | undefined {
+  return (err as { status?: number })?.status
 }
 
-async function readDoc(knowledge: KnowledgeBase): Promise<HierarchyDoc | null> {
-  const raw = await knowledge.read(HIERARCHY_PATH)
-  if (!raw) return null
-  try {
-    return JSON.parse(raw) as HierarchyDoc
-  } catch {
-    return null
-  }
-}
-
-/** Ensure the hierarchy doc + a default epic exist; return the epic id (seeds on first use). */
-export async function ensureSeedEpicId(knowledge: KnowledgeBase): Promise<string> {
-  const doc = await readDoc(knowledge)
-  const existing = doc && Object.keys(doc.epics)[0]
-  if (existing) return existing
-  await knowledge.write(HIERARCHY_PATH, JSON.stringify(DEFAULT_DOC, null, 2))
-  return "epic-1"
+interface ParentIssue {
+  number: number
+  title: string
+  body: string
 }
 
 /**
- * Hierarchy backed by GitHub: the mission→goal→epic tree lives in a versioned repo doc (via the
- * KnowledgeBase) and tickets (issues) reference an epic id. `traceContext` walks epic → goal →
- * mission to reconstruct the chain — so trace works even though Issues are flat.
+ * Hierarchy backed by **native GitHub sub-issues**. Mission/Goal/Epic are issues (labelled
+ * `type:mission|goal|epic`) linked as parent→child; tickets are sub-issues of an epic.
+ * `traceContext` walks the native parent chain — the GitHub-native model. (Sub-issue endpoints take
+ * the issue's database `id`, not its number.)
  */
 export class GitHubHierarchy implements Hierarchy {
   constructor(
-    private readonly tracker: IssueTracker,
-    private readonly knowledge: KnowledgeBase,
+    private readonly octokit: Octokit,
+    private readonly repo: { owner: string; repo: string },
   ) {}
 
   async traceContext(ticketId: string): Promise<string> {
-    const [ticket, doc] = await Promise.all([this.tracker.get(ticketId), readDoc(this.knowledge)])
-    if (!ticket || !doc) return `Ticket ${ticketId} (no trace context found).`
-    const epic = doc.epics[ticket.epicId]
-    const goal = epic ? doc.goals[epic.goalId] : undefined
+    const number = issueNumber(ticketId)
+    const ticket = await this.issueTitle(number)
+    if (ticket === null) return `Ticket ${ticketId} (no trace context found).`
+    const epic = await this.parentOf(number)
+    const goal = epic ? await this.parentOf(epic.number) : null
+    const mission = goal ? await this.parentOf(goal.number) : null
     return [
-      `Mission: ${doc.mission.title} — ${doc.mission.statement}`,
-      goal ? `Goal: ${goal.title} — ${goal.description}` : "Goal: (unknown)",
+      mission ? `Mission: ${mission.title} — ${mission.body}` : "Mission: (unknown)",
+      goal ? `Goal: ${goal.title} — ${goal.body}` : "Goal: (unknown)",
       epic ? `Epic: ${epic.title}` : "Epic: (unknown)",
-      `Ticket: ${ticket.title}`,
+      `Ticket: ${ticket}`,
     ].join("\n")
+  }
+
+  /** Ensure mission→goal→epic issues exist (linked as sub-issues); return the epic issue number. */
+  async ensureSeedEpicId(): Promise<string> {
+    const { data } = await this.octokit.rest.issues.listForRepo({
+      ...this.repo,
+      labels: "type:epic",
+      state: "all",
+      per_page: 1,
+    })
+    const existing = data[0]
+    if (existing) return String(existing.number)
+
+    const mission = await this.create("Deliver the product", "Ship value to users.", "type:mission")
+    const goal = await this.create("Bootstrap the unit", "Stand up delivery.", "type:goal")
+    const epic = await this.create("Vertical slice", "First end-to-end flow.", "type:epic")
+    await this.link(mission.number, goal.id)
+    await this.link(goal.number, epic.id)
+    return String(epic.number)
+  }
+
+  /** Link a ticket issue (database id) as a sub-issue of an epic (issue number). */
+  async attachTicket(epicId: string, ticketIssueId: number): Promise<void> {
+    await this.link(Number(epicId), ticketIssueId)
+  }
+
+  private async create(
+    title: string,
+    body: string,
+    label: string,
+  ): Promise<{ number: number; id: number }> {
+    const { data } = await this.octokit.rest.issues.create({
+      ...this.repo,
+      title,
+      body,
+      labels: [label],
+    })
+    return { number: data.number, id: data.id }
+  }
+
+  private async link(parentNumber: number, childId: number): Promise<void> {
+    await this.octokit.request("POST /repos/{owner}/{repo}/issues/{issue_number}/sub_issues", {
+      ...this.repo,
+      issue_number: parentNumber,
+      sub_issue_id: childId,
+    })
+  }
+
+  private async issueTitle(number: number): Promise<string | null> {
+    try {
+      const { data } = await this.octokit.rest.issues.get({ ...this.repo, issue_number: number })
+      return data.title
+    } catch (err) {
+      if (status(err) === 404) return null
+      throw err
+    }
+  }
+
+  private async parentOf(number: number): Promise<ParentIssue | null> {
+    try {
+      const { data } = await this.octokit.request(
+        "GET /repos/{owner}/{repo}/issues/{issue_number}/parent",
+        { ...this.repo, issue_number: number },
+      )
+      return { number: data.number, title: data.title, body: data.body ?? "" }
+    } catch (err) {
+      if (status(err) === 404) return null
+      throw err
+    }
   }
 }

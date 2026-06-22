@@ -208,7 +208,7 @@ docker compose down      # or: pnpm docker:down
 - **Persistence:** pluggable ports in `core` (`IssueTracker` · `KnowledgeBase` · `Hierarchy` ·
   `AuditLog`) + a factory (`createPersistence`/`persistenceFromEnv`) selected by
   `PERSISTENCE_BACKEND` = `github` | `postgres`. GitHub backend = Issues + repo-docs KB (Contents
-  API; Wikis have no API) + the mission→goal→epic hierarchy as a versioned `hierarchy.json` doc;
+  API; Wikis have no API) + the mission→goal→epic hierarchy as native GitHub **sub-issues**;
   audit stays in Postgres. Swapping backends never touches `core` or the workflow.
 
 **Working assumptions (confirm or redirect):**

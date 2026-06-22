@@ -23,9 +23,10 @@ export function createPersistence(backend: PersistenceBackend): Persistence {
   if (backend === "github") {
     const gh = githubConfig()
     if (gh) {
+      const hierarchy = createGitHubHierarchy(gh)
+      const tracker = createGitHubIssueTracker(gh, hierarchy)
       const knowledge = createGitHubKnowledgeBase({ ...gh, prefix: process.env.GITHUB_DOCS_PREFIX })
-      const tracker = createGitHubIssueTracker(gh, knowledge)
-      return { tracker, knowledge, hierarchy: createGitHubHierarchy(tracker, knowledge), audit }
+      return { tracker, knowledge, hierarchy, audit }
     }
   }
   return {
