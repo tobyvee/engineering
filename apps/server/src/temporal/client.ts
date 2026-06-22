@@ -34,6 +34,21 @@ export async function startTicketLifecycle(ticketId: string): Promise<void> {
   }
 }
 
+/** Start agent-driven decomposition for an epic (idempotent while one is already running). */
+export async function startEpicDecomposition(epicId: string): Promise<void> {
+  const client = await getTemporalClient()
+  try {
+    await client.workflow.start("epicDecomposition", {
+      taskQueue: TASK_QUEUE,
+      workflowId: `epic-decompose-${epicId}`,
+      args: [epicId],
+    })
+  } catch (err) {
+    if ((err as { name?: string })?.name === "WorkflowExecutionAlreadyStartedError") return
+    throw err
+  }
+}
+
 /** Release an approval gate ("merge" or "deploy") by signaling the running workflow (invariant #4). */
 export async function approveTicket(ticketId: string, gate: "merge" | "deploy"): Promise<void> {
   const client = await getTemporalClient()

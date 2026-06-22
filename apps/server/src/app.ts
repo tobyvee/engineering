@@ -1,6 +1,6 @@
 import { Hono } from "hono"
 import { persistenceFromEnv } from "./persistence"
-import { approveTicket, startTicketLifecycle } from "./temporal/client"
+import { approveTicket, startEpicDecomposition, startTicketLifecycle } from "./temporal/client"
 
 /**
  * The HTTP API. GET routes are read views over append-only state. Mutations that affect agent work
@@ -46,6 +46,14 @@ app.post("/api/epics", async (c) => {
     goalId: body.goalId,
   })
   return c.json({ epic }, 201)
+})
+
+// Agent-driven decomposition: the Lead Engineer breaks the epic into backlog tickets. Durable +
+// retried, so it goes through Temporal like other agent work.
+app.post("/api/epics/:id/decompose", async (c) => {
+  const id = c.req.param("id")
+  await startEpicDecomposition(id)
+  return c.json({ epicId: id, decomposing: true })
 })
 
 // Create a ticket through the tracker under a chosen epic (or seed the default Mission→Goal→Epic

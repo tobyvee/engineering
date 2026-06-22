@@ -16,6 +16,11 @@ function GoalCard({ goal }: { goal: HierarchyNode }) {
       qc.invalidateQueries({ queryKey: ["epics"] })
     },
   })
+  const decompose = useMutation({
+    mutationFn: (epicId: string) => api.decomposeEpic(epicId),
+    // New tickets land in backlog — refresh the Board's view.
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["tickets"] }),
+  })
 
   const epics = data ?? []
   return (
@@ -27,7 +32,18 @@ function GoalCard({ goal }: { goal: HierarchyNode }) {
       {epics.length > 0 && (
         <ul className="sub">
           {epics.map((e) => (
-            <li key={e.id}>{e.title}</li>
+            <li key={e.id} className="sub-row">
+              <span>{e.title}</span>
+              <button
+                className="btn"
+                type="button"
+                onClick={() => decompose.mutate(e.id)}
+                disabled={decompose.isPending}
+                title="Lead Engineer agent breaks this epic into tickets"
+              >
+                Decompose
+              </button>
+            </li>
           ))}
         </ul>
       )}

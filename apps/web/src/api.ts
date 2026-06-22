@@ -32,6 +32,7 @@ export const api = {
     postJson<{ epic: HierarchyNode }>("/api/epics", { title, goalId }),
   createTicket: (title: string, epicId?: string) =>
     postJson<{ ticket: Ticket }>("/api/tickets", { title, epicId }),
+  decomposeEpic: (id: string) => postJson<{ decomposing: boolean }>(`/api/epics/${id}/decompose`),
   startTicket: (id: string) => postJson<{ started: boolean }>(`/api/tickets/${id}/start`),
   approve: (id: string, gate: "merge" | "deploy") =>
     postJson<{ signaled: boolean }>(`/api/tickets/${id}/approve`, { gate }),

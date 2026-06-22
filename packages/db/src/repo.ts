@@ -215,6 +215,36 @@ export async function getTraceContext(ticketId: string): Promise<string> {
   ].join("\n")
 }
 
+/**
+ * The mission → goal → epic context for an epic (its own description included) — the "why" handed to
+ * the Lead Engineer agent when decomposing the epic into tickets.
+ */
+export async function getEpicContext(epicId: string): Promise<string> {
+  const row = (
+    await db
+      .select({
+        epicTitle: epics.title,
+        epicDescription: epics.description,
+        goalTitle: goals.title,
+        goalDescription: goals.description,
+        missionTitle: missions.title,
+        missionStatement: missions.statement,
+      })
+      .from(epics)
+      .innerJoin(goals, eq(epics.goalId, goals.id))
+      .innerJoin(missions, eq(goals.missionId, missions.id))
+      .where(eq(epics.id, epicId))
+      .limit(1)
+  )[0]
+
+  if (!row) return `Epic ${epicId} (no context found).`
+  return [
+    `Mission: ${row.missionTitle} — ${row.missionStatement}`,
+    `Goal: ${row.goalTitle} — ${row.goalDescription}`,
+    `Epic: ${row.epicTitle} — ${row.epicDescription}`,
+  ].join("\n")
+}
+
 /** Update only — audit is appended by the orchestrator through the AuditLog port. */
 export async function setTicketStatus(id: string, status: TicketStatus): Promise<void> {
   await db.update(tickets).set({ status, updatedAt: new Date() }).where(eq(tickets.id, id))

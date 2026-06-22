@@ -12,6 +12,9 @@ export interface HierarchyNode {
  */
 export interface Hierarchy {
   traceContext(ticketId: string): Promise<string>
+  /** The mission→goal→epic context for an epic — the "why" fed to the Lead Engineer when it
+   *  decomposes the epic into tickets. */
+  epicContext(epicId: string): Promise<string>
   listGoals(): Promise<HierarchyNode[]>
   createGoal(input: { title: string; description?: string }): Promise<HierarchyNode>
   /** Epics, optionally scoped to a goal. */

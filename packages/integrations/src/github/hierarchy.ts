@@ -29,8 +29,8 @@ export class GitHubHierarchy implements Hierarchy {
 
   async traceContext(ticketId: string): Promise<string> {
     const number = issueNumber(ticketId)
-    const ticket = await this.issueTitle(number)
-    if (ticket === null) return `Ticket ${ticketId} (no trace context found).`
+    const ticket = await this.issue(number)
+    if (!ticket) return `Ticket ${ticketId} (no trace context found).`
     const epic = await this.parentOf(number)
     const goal = epic ? await this.parentOf(epic.number) : null
     const mission = goal ? await this.parentOf(goal.number) : null
@@ -38,7 +38,20 @@ export class GitHubHierarchy implements Hierarchy {
       mission ? `Mission: ${mission.title} — ${mission.body}` : "Mission: (unknown)",
       goal ? `Goal: ${goal.title} — ${goal.body}` : "Goal: (unknown)",
       epic ? `Epic: ${epic.title}` : "Epic: (unknown)",
-      `Ticket: ${ticket}`,
+      `Ticket: ${ticket.title}`,
+    ].join("\n")
+  }
+
+  async epicContext(epicId: string): Promise<string> {
+    const number = Number(epicId)
+    const epic = await this.issue(number)
+    if (!epic) return `Epic ${epicId} (no context found).`
+    const goal = await this.parentOf(number)
+    const mission = goal ? await this.parentOf(goal.number) : null
+    return [
+      mission ? `Mission: ${mission.title} — ${mission.body}` : "Mission: (unknown)",
+      goal ? `Goal: ${goal.title} — ${goal.body}` : "Goal: (unknown)",
+      `Epic: ${epic.title} — ${epic.body}`,
     ].join("\n")
   }
 
@@ -143,10 +156,10 @@ export class GitHubHierarchy implements Hierarchy {
     })
   }
 
-  private async issueTitle(number: number): Promise<string | null> {
+  private async issue(number: number): Promise<{ title: string; body: string } | null> {
     try {
       const { data } = await this.octokit.rest.issues.get({ ...this.repo, issue_number: number })
-      return data.title
+      return { title: data.title, body: data.body ?? "" }
     } catch (err) {
       if (status(err) === 404) return null
       throw err

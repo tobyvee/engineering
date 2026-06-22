@@ -1,4 +1,4 @@
-import { assess, proposeFileChanges } from "@eng/agents"
+import { assess, proposeFileChanges, proposeTickets } from "@eng/agents"
 import {
   type DeliveryAdapter,
   type DeployState,
@@ -27,6 +27,65 @@ export async function transitionTicket(ticketId: string, status: TicketStatus): 
     ticketId,
     payload: { status },
   })
+}
+
+/**
+ * Agent-driven decomposition: the Lead Engineer agent breaks an epic into implementable tickets,
+ * each created in `backlog` under the epic (traceable, invariant #1) and audited. Budget is enforced
+ * centrally (invariant #3). When the agent runtime is unavailable (e.g. no credentials), it records
+ * `decomposition_skipped` and creates nothing — the no-op mirrors the implementation step.
+ */
+export async function decomposeEpic(epicId: string): Promise<string[]> {
+  const role = ROLES.lead_engineer
+  const goalContext = await persistence.hierarchy.epicContext(epicId)
+  const remaining = (await getBudgetRemaining(role.id)) ?? role.monthlyBudgetCents
+
+  let proposed: Awaited<ReturnType<typeof proposeTickets>>
+  try {
+    proposed = await proposeTickets({
+      role: role.id,
+      systemPrompt: role.systemPrompt,
+      goalContext,
+      task: "Decompose this epic into implementable tickets.",
+      budgetCentsRemaining: remaining,
+    })
+    await addSpend(role.id, proposed.costCents)
+  } catch (err) {
+    await persistence.audit.append({
+      actor: "system",
+      kind: "decomposition_skipped",
+      ticketId: null,
+      payload: { epicId, error: String(err) },
+    })
+    return []
+  }
+
+  const created: string[] = []
+  for (const t of proposed.tickets) {
+    const ticket = await persistence.tracker.createTicket({
+      epicId,
+      title: t.title,
+      description: t.description,
+      status: "backlog",
+      stage: "implementation",
+      assigneeRole: t.assigneeRole,
+      acceptanceCriteria: t.acceptanceCriteria,
+    })
+    created.push(ticket.id)
+    await persistence.audit.append({
+      actor: "lead_engineer",
+      kind: "ticket_created",
+      ticketId: ticket.id,
+      payload: { epicId, assigneeRole: t.assigneeRole, criteria: t.acceptanceCriteria.length },
+    })
+  }
+  await persistence.audit.append({
+    actor: "lead_engineer",
+    kind: "epic_decomposed",
+    ticketId: null,
+    payload: { epicId, tickets: created.length, costCents: proposed.costCents },
+  })
+  return created
 }
 
 /** Start the lifecycle for any `backlog` tickets (idempotent). Driven by the heartbeat schedule. */

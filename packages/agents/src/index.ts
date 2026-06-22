@@ -4,6 +4,13 @@ import { ClaudeWorker, type ClaudeWorkerOptions } from "./claude-worker"
 export { type AssessInput, type Assessment, assess, parseVerdict } from "./assess"
 export type { ClaudeWorkerOptions, WorkerBackend, WorkerMode } from "./claude-worker"
 export { ClaudeWorker } from "./claude-worker"
+export {
+  type ProposedTicket,
+  type ProposedTickets,
+  type ProposeTicketsInput,
+  parseTickets,
+  proposeTickets,
+} from "./decompose"
 export { DEFAULT_MODEL } from "./prompt"
 export {
   type ProposeChangesInput,

@@ -11,6 +11,7 @@ const {
   checkDeployStatus,
   recordDeploy,
   pickUpBacklog,
+  decomposeEpic,
 } = proxyActivities<typeof activities>({
   startToCloseTimeout: "10 minutes",
   retry: { maximumAttempts: 3 },
@@ -19,6 +20,15 @@ const {
 /** Heartbeat: fired on a schedule; starts the lifecycle for any backlog tickets. */
 export async function heartbeat(): Promise<void> {
   await pickUpBacklog()
+}
+
+/**
+ * Agent-driven decomposition as a durable step: the Lead Engineer breaks the epic into backlog
+ * tickets (retried on failure). Each ticket then runs its own `ticketLifecycle` (started by the
+ * human on the Board, or auto-picked by the heartbeat).
+ */
+export async function epicDecomposition(epicId: string): Promise<void> {
+  await decomposeEpic(epicId)
 }
 
 /**

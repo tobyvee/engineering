@@ -24,9 +24,9 @@ full decisions log; this file is a snapshot inventory of what's been built.
 |------|------|--------------|
 | `packages/core` | Domain heart (framework-agnostic) | zod schemas (`Mission→Goal→Epic→Ticket`, budgets, approvals, audit), 7 role personas, `Worker` / `DeliveryAdapter` / `IssueTracker` / `AuditLog` interfaces, budget helpers |
 | `packages/db` | Persistence | Drizzle schema (8 FK-linked tables), `repo.ts` (tickets/audit/trace-context), client, migrations `0000`+`0001` |
-| `packages/agents` | Agent runtime | `ClaudeWorker` (api/cli backends), `proposeFileChanges` + `parseProposal`, pricing, prompt builder |
+| `packages/agents` | Agent runtime | `ClaudeWorker` (api/cli backends), `proposeFileChanges`, `proposeTickets` (epic decomposition), `assess`, pricing, prompt builder |
 | `packages/integrations` | GitHub adapters | `GitHubDeliveryAdapter` (branch/commit/PR/checks/merge/deploy), `GitHubIssueTracker` (issues), `GitHubKnowledgeBase` (repo docs via Contents API) + factories |
-| `apps/server` | Orchestration | Hono API (`app.ts`), Temporal `client`/`worker`/`workflows`/`activities`, heartbeat stub |
+| `apps/server` | Orchestration | Hono API (`app.ts`), Temporal `client`/`worker`/`workflows`/`activities` (incl. `epicDecomposition`), heartbeat schedule |
 | `apps/web` | Dashboard | React + Vite, TanStack Router/Query, Board/Roadmap/Approvals/Audit pages, typed API client |
 
 ## Persistence (pluggable backends)
@@ -97,8 +97,8 @@ human approval gates.
 
 | Item | State |
 |------|-------|
-| Quality gates | typecheck 6/6 · tests 42/42 · web build · Biome lint clean |
-| Live-proven | vertical slice, delivery loop, both human gates, goal/epic authoring via the web proxy (Postgres + Temporal) |
+| Quality gates | typecheck 6/6 · tests 46/46 · web build · Biome lint clean |
+| Live-proven | vertical slice, delivery loop, both human gates, goal/epic authoring, agent-driven decomposition wired API→Temporal→Lead-Engineer→audit (Postgres + Temporal) |
 | Unit-tested (no live creds) | GitHub adapter (branch/PR/checks/merge/commit/deploy), `parseProposal`, pricing/budget |
 | Infra | `docker compose up` turnkey: Postgres → auto-migrate → Temporal → UI → server → worker → web |
 | Docs | `CLAUDE.md` (north-star + decisions), `README.md`, this overview |
@@ -114,13 +114,14 @@ human approval gates.
 | Heartbeat | Temporal Schedule auto-starts `backlog` tickets (verified: ~5s pickup) |
 | Budgets | seeded per role; `implementTicket`/`verifyTicket` read remaining (limit−spent) and record spend |
 | QA/Test | QA agent verifies acceptance criteria after implementation; a fail blocks the ticket |
+| Decomposition | Lead Engineer agent breaks an epic into backlog tickets (`epicDecomposition` workflow); each ticket then runs its own lifecycle |
 
 ## Not yet built (honest gaps)
 
 - Linear / Jira `IssueTracker` backends (GitHub + Postgres exist); a literal GitHub Wiki
   (`.wiki.git`) KB adapter.
-- Earlier lifecycle stages (discovery/design/architecture by PM/UX/Architect) and work decomposition
-  (Lead Engineer breaking epics into tickets) — the slice jumps straight to implementation.
+- Earlier lifecycle stages (discovery/design/architecture by PM/UX/Architect agents) — the slice now
+  covers decomposition → implementation → review → ship, but not the upstream discovery/design/architecture.
 - No remote / CI for this repo itself.
 - A true end-to-end run needs real credentials: `ANTHROPIC_API_KEY` + a GitHub repo / token / deploy
   workflow (it bills and creates real objects).

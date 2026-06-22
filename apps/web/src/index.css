@@ -171,6 +171,13 @@ li {
   color: var(--muted);
 }
 
+.sub-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
 .muted {
   color: var(--muted);
   font-size: 14px;
