@@ -1,5 +1,5 @@
 import type { IssueTracker, NewTicket, Ticket, TicketStatus } from "@eng/core"
-import { getTicket, insertTicket, listTickets, setTicketStatus } from "./repo"
+import { ensureSeedEpicId, getTicket, insertTicket, listTickets, setTicketStatus } from "./repo"
 
 /**
  * IssueTracker backed by our Postgres store — the source of truth for tickets. Conforms the repo to
@@ -7,8 +7,13 @@ import { getTicket, insertTicket, listTickets, setTicketStatus } from "./repo"
  * alternative implementation behind the same interface.
  */
 export class DbIssueTracker implements IssueTracker {
-  createTicket(input: NewTicket): Promise<Ticket> {
-    return insertTicket(input)
+  async createTicket(input: NewTicket): Promise<Ticket> {
+    const epicId = input.epicId || (await ensureSeedEpicId())
+    return insertTicket({ ...input, epicId })
+  }
+
+  get(id: string): Promise<Ticket | null> {
+    return getTicket(id)
   }
 
   async transition(id: string, status: TicketStatus): Promise<Ticket> {

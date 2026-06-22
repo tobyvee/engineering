@@ -92,22 +92,6 @@ export async function ensureSeedEpicId(): Promise<string> {
   return epic.id
 }
 
-export async function createTicket(input: {
-  title: string
-  description?: string
-}): Promise<Ticket> {
-  const epicId = await ensureSeedEpicId()
-  const ticket = firstOrThrow(
-    await db
-      .insert(tickets)
-      .values({ epicId, title: input.title, description: input.description ?? "" })
-      .returning(),
-    "ticket",
-  )
-  await appendAudit({ actor: "system", kind: "ticket_created", ticketId: ticket.id, payload: {} })
-  return toTicket(ticket)
-}
-
 /** Insert a fully-specified ticket (all fields). Used by the IssueTracker. */
 export async function insertTicket(input: NewTicket): Promise<Ticket> {
   const ticket = firstOrThrow(
@@ -125,7 +109,6 @@ export async function insertTicket(input: NewTicket): Promise<Ticket> {
       .returning(),
     "ticket",
   )
-  await appendAudit({ actor: "system", kind: "ticket_created", ticketId: ticket.id, payload: {} })
   return toTicket(ticket)
 }
 
@@ -171,9 +154,9 @@ export async function getTraceContext(ticketId: string): Promise<string> {
   ].join("\n")
 }
 
+/** Update only — audit is appended by the orchestrator through the AuditLog port. */
 export async function setTicketStatus(id: string, status: TicketStatus): Promise<void> {
   await db.update(tickets).set({ status, updatedAt: new Date() }).where(eq(tickets.id, id))
-  await appendAudit({ actor: "system", kind: "state_change", ticketId: id, payload: { status } })
 }
 
 /** Append-only (invariant #2): inserts only. */

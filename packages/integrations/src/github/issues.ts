@@ -109,6 +109,19 @@ export class GitHubIssueTracker implements IssueTracker {
     return toTicket(data)
   }
 
+  async get(id: string): Promise<Ticket | null> {
+    try {
+      const { data } = await this.octokit.rest.issues.get({
+        ...this.repo,
+        issue_number: issueNumber(id),
+      })
+      return toTicket(data)
+    } catch (err) {
+      if ((err as { status?: number })?.status === 404) return null
+      throw err
+    }
+  }
+
   async transition(id: string, status: TicketStatus): Promise<Ticket> {
     const issue_number = issueNumber(id)
     const { data: current } = await this.octokit.rest.issues.get({ ...this.repo, issue_number })

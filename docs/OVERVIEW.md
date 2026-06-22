@@ -42,8 +42,13 @@ The agents' state persists through **ports in `core`** — `IssueTracker`, `Know
 | Audit (`AuditLog`) | `DbAuditLog` | `DbAuditLog` (stays in Postgres — the dashboard read-model) |
 
 > GitHub Wikis have **no REST/GraphQL API** (only a `.wiki.git` repo), so the KB uses repo files —
-> the supported, reviewable equivalent. The implementation step persists notes to
-> `tickets/<id>.md` via the selected backend (verified live on Postgres).
+> the supported, reviewable equivalent.
+
+The API and workflow are **fully routed through these ports** — ticket create/get/transition/list via
+`persistence.tracker`, all audit via `persistence.audit`, knowledge via `persistence.knowledge` —
+so `PERSISTENCE_BACKEND` governs where agent state lives. (Budgets and the goal-hierarchy trace stay
+in Postgres — control-plane concerns the tracker port doesn't model.) Verified live on Postgres: the
+audit trail is unchanged through the ports.
 
 ## Settled decisions (with rejected alternatives)
 
@@ -107,8 +112,8 @@ human approval gates.
 ## Not yet built (honest gaps)
 
 - Linear / Jira `IssueTracker` backends (GitHub + Postgres exist); a literal GitHub Wiki
-  (`.wiki.git`) KB adapter; fully routing the tracker + audit through the factory (only the KB write
-  is wired into the workflow so far).
+  (`.wiki.git`) KB adapter; modelling the goal hierarchy (mission→goal→epic) on the GitHub backend
+  (it stays in Postgres today, so trace context is degraded when tickets live in GitHub Issues).
 - Earlier lifecycle stages (discovery/design/architecture by PM/UX/Architect) and work decomposition
   (Lead Engineer breaking epics into tickets) — the slice jumps straight to implementation.
 - No remote / CI for this repo itself.

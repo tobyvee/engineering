@@ -6,31 +6,32 @@ import {
   ROLES,
   type TicketStatus,
 } from "@eng/core"
-import {
-  addSpend,
-  appendAudit,
-  getBudgetRemaining,
-  getTicket,
-  getTraceContext,
-  listTickets,
-  setTicketStatus,
-} from "@eng/db"
+import { addSpend, getBudgetRemaining, getTraceContext } from "@eng/db"
 import { createGitHubDelivery } from "@eng/integrations"
 import { persistenceFromEnv } from "../persistence"
 import { startTicketLifecycle } from "./client"
 
 /**
  * Activities are the side-effecting steps the durable workflow calls. They run in the normal Node
- * runtime (DB writes, agent runs, GitHub calls, audit appends) and — unlike workflow code — need
- * not be deterministic.
+ * runtime and — unlike workflow code — need not be deterministic. Ticket state + audit go through
+ * the persistence layer (backend selected by PERSISTENCE_BACKEND); the goal-hierarchy trace and
+ * budgets stay in Postgres (control-plane concerns the tracker port doesn't model).
  */
+const persistence = persistenceFromEnv()
+
 export async function transitionTicket(ticketId: string, status: TicketStatus): Promise<void> {
-  await setTicketStatus(ticketId, status)
+  await persistence.tracker.transition(ticketId, status)
+  await persistence.audit.append({
+    actor: "system",
+    kind: "state_change",
+    ticketId,
+    payload: { status },
+  })
 }
 
 /** Start the lifecycle for any `backlog` tickets (idempotent). Driven by the heartbeat schedule. */
 export async function pickUpBacklog(): Promise<number> {
-  const backlog = (await listTickets()).filter((t) => t.status === "backlog")
+  const backlog = await persistence.tracker.list({ status: "backlog" })
   for (const ticket of backlog) {
     await startTicketLifecycle(ticket.id)
   }
@@ -52,13 +53,16 @@ const DEPLOY_WORKFLOW = process.env.GITHUB_DEPLOY_WORKFLOW
 const DEPLOY_REF = process.env.GITHUB_DEPLOY_REF ?? BASE_BRANCH
 
 /**
- * The implementation step: a Staff Engineer agent writes the code, then — if GitHub is configured —
- * the changes are committed to a ticket branch and a PR is opened. Returns the PR (for the later
- * merge) or null. A no-op delivery when GitHub isn't set, so the lifecycle still completes.
+ * The implementation step: a Staff Engineer agent writes the code and persists notes to the KB; then
+ * — if GitHub is configured — the changes are committed to a ticket branch and a PR is opened.
+ * Returns the PR (for the later merge) or null.
  */
 export async function implementTicket(ticketId: string): Promise<PullRequestRef | null> {
   const role = ROLES.staff_engineer
-  const [ticket, goalContext] = await Promise.all([getTicket(ticketId), getTraceContext(ticketId)])
+  const [ticket, goalContext] = await Promise.all([
+    persistence.tracker.get(ticketId),
+    getTraceContext(ticketId),
+  ])
   const title = ticket?.title ?? `Ticket ${ticketId}`
 
   // Central budget enforcement (invariant #3): remaining = limit − spent from the budgets table.
@@ -76,7 +80,7 @@ export async function implementTicket(ticketId: string): Promise<PullRequestRef 
       budgetCentsRemaining: remaining,
     })
     await addSpend(role.id, proposed.costCents)
-    await appendAudit({
+    await persistence.audit.append({
       actor: "staff_engineer",
       kind: "agent_step",
       ticketId,
@@ -89,7 +93,7 @@ export async function implementTicket(ticketId: string): Promise<PullRequestRef 
       },
     })
   } catch (err) {
-    await appendAudit({
+    await persistence.audit.append({
       actor: "system",
       kind: "agent_step_skipped",
       ticketId,
@@ -100,15 +104,15 @@ export async function implementTicket(ticketId: string): Promise<PullRequestRef 
   // Persist the implementation notes to the knowledge base (backend selected by PERSISTENCE_BACKEND).
   try {
     const doc = `# ${title}\n\n${goalContext}\n\n## Implementation notes\n\n${proposed?.summary ?? "(agent runtime unavailable)"}\n`
-    await persistenceFromEnv().knowledge.write(`tickets/${ticketId}.md`, doc)
-    await appendAudit({
+    await persistence.knowledge.write(`tickets/${ticketId}.md`, doc)
+    await persistence.audit.append({
       actor: "staff_engineer",
       kind: "knowledge_written",
       ticketId,
       payload: { path: `tickets/${ticketId}.md` },
     })
   } catch (err) {
-    await appendAudit({
+    await persistence.audit.append({
       actor: "system",
       kind: "knowledge_skipped",
       ticketId,
@@ -118,7 +122,7 @@ export async function implementTicket(ticketId: string): Promise<PullRequestRef 
 
   const delivery = deliveryFromEnv()
   if (!delivery) {
-    await appendAudit({
+    await persistence.audit.append({
       actor: "system",
       kind: "delivery_skipped",
       ticketId,
@@ -127,7 +131,7 @@ export async function implementTicket(ticketId: string): Promise<PullRequestRef 
     return null
   }
   if (!proposed || proposed.files.length === 0) {
-    await appendAudit({
+    await persistence.audit.append({
       actor: "system",
       kind: "delivery_skipped",
       ticketId,
@@ -140,14 +144,14 @@ export async function implementTicket(ticketId: string): Promise<PullRequestRef 
   try {
     await delivery.createBranch(BASE_BRANCH, branch)
     const commit = await delivery.commitFiles(branch, `feat: ${title}`, proposed.files)
-    await appendAudit({
+    await persistence.audit.append({
       actor: "staff_engineer",
       kind: "code_pushed",
       ticketId,
       payload: { branch, sha: commit.sha, files: proposed.files.length },
     })
     const pr = await delivery.openPullRequest({ branch, title, body: proposed.summary })
-    await appendAudit({
+    await persistence.audit.append({
       actor: "lead_engineer",
       kind: "pr_opened",
       ticketId,
@@ -155,7 +159,7 @@ export async function implementTicket(ticketId: string): Promise<PullRequestRef 
     })
     return pr
   } catch (err) {
-    await appendAudit({
+    await persistence.audit.append({
       actor: "system",
       kind: "delivery_error",
       ticketId,
@@ -172,7 +176,10 @@ export async function implementTicket(ticketId: string): Promise<PullRequestRef 
 export async function verifyTicket(ticketId: string): Promise<boolean> {
   const role = ROLES.qa_test
   const remaining = (await getBudgetRemaining(role.id)) ?? role.monthlyBudgetCents
-  const [ticket, goalContext] = await Promise.all([getTicket(ticketId), getTraceContext(ticketId)])
+  const [ticket, goalContext] = await Promise.all([
+    persistence.tracker.get(ticketId),
+    getTraceContext(ticketId),
+  ])
   try {
     const verdict = await assess({
       role: role.id,
@@ -184,7 +191,7 @@ export async function verifyTicket(ticketId: string): Promise<boolean> {
       budgetCentsRemaining: remaining,
     })
     await addSpend(role.id, verdict.costCents)
-    await appendAudit({
+    await persistence.audit.append({
       actor: "qa_test",
       kind: verdict.passed ? "qa_passed" : "qa_failed",
       ticketId,
@@ -192,7 +199,7 @@ export async function verifyTicket(ticketId: string): Promise<boolean> {
     })
     return verdict.passed
   } catch (err) {
-    await appendAudit({
+    await persistence.audit.append({
       actor: "system",
       kind: "qa_skipped",
       ticketId,
@@ -220,7 +227,7 @@ export async function mergeDelivery(ticketId: string, pr: PullRequestRef): Promi
   if (!delivery) return true
   try {
     await delivery.merge(pr)
-    await appendAudit({
+    await persistence.audit.append({
       actor: "lead_engineer",
       kind: "pr_merged",
       ticketId,
@@ -228,7 +235,7 @@ export async function mergeDelivery(ticketId: string, pr: PullRequestRef): Promi
     })
     return true
   } catch (err) {
-    await appendAudit({
+    await persistence.audit.append({
       actor: "system",
       kind: "merge_failed",
       ticketId,
@@ -248,7 +255,7 @@ export async function mergeDelivery(ticketId: string, pr: PullRequestRef): Promi
 export async function startDeploy(ticketId: string): Promise<number | null> {
   const delivery = deliveryFromEnv()
   if (!delivery || !DEPLOY_WORKFLOW) {
-    await appendAudit({
+    await persistence.audit.append({
       actor: "system",
       kind: "deploy_skipped",
       ticketId,
@@ -264,7 +271,7 @@ export async function startDeploy(ticketId: string): Promise<number | null> {
       ref: DEPLOY_REF,
       inputs: { ticket: ticketId },
     })
-    await appendAudit({
+    await persistence.audit.append({
       actor: "lead_engineer",
       kind: "deploy_dispatched",
       ticketId,
@@ -272,7 +279,7 @@ export async function startDeploy(ticketId: string): Promise<number | null> {
     })
     return afterRunId
   } catch (err) {
-    await appendAudit({
+    await persistence.audit.append({
       actor: "system",
       kind: "deploy_error",
       ticketId,
@@ -295,7 +302,7 @@ export async function checkDeployStatus(afterRunId: number): Promise<DeployState
 }
 
 export async function recordDeploy(ticketId: string, state: DeployState): Promise<void> {
-  await appendAudit({
+  await persistence.audit.append({
     actor: "lead_engineer",
     kind: state === "success" ? "deployed" : "deploy_failed",
     ticketId,
