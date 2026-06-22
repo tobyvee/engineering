@@ -101,6 +101,8 @@ services:
       GITHUB_BASE_BRANCH: ${GITHUB_BASE_BRANCH:-main}
       GITHUB_DEPLOY_WORKFLOW: ${GITHUB_DEPLOY_WORKFLOW:-}
       GITHUB_DEPLOY_REF: ${GITHUB_DEPLOY_REF:-main}
+      PERSISTENCE_BACKEND: ${PERSISTENCE_BACKEND:-postgres}
+      GITHUB_DOCS_PREFIX: ${GITHUB_DOCS_PREFIX:-docs}
     command: ["pnpm", "--filter", "@eng/server", "worker"]
 
   web:

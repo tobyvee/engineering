@@ -205,6 +205,10 @@ docker compose down      # or: pnpm docker:down
 - **Web dashboard:** **React + Vite** (code-based TanStack Router + TanStack Query). A SPA over the
   Hono API — no second server, keeping the `core` boundary clean. (Not Next.js: its server/RSC model
   would duplicate `apps/server` and tempt direct DB access from the UI.)
+- **Persistence:** pluggable ports in `core` (`IssueTracker` · `KnowledgeBase` · `AuditLog`) +
+  a factory (`createPersistence`/`persistenceFromEnv`) selected by `PERSISTENCE_BACKEND` =
+  `github` | `postgres`. GitHub backend = Issues + repo-docs KB (Contents API; Wikis have no API);
+  audit stays in Postgres. Swapping backends never touches `core` or the workflow.
 
 **Working assumptions (confirm or redirect):**
 - _Agent runtime:_ Claude-first — `ClaudeWorker` (Anthropic API + `claude -p` CLI backends) as the default `Worker`, pluggable behind the interface.

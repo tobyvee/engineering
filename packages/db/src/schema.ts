@@ -117,6 +117,13 @@ export const approvals = pgTable("approvals", {
   decidedAt: timestamp("decided_at", { withTimezone: true }),
 })
 
+/** Knowledge base / docs store (the Postgres-backed KnowledgeBase). */
+export const kbDocs = pgTable("kb_docs", {
+  path: text("path").primaryKey(),
+  content: text("content").notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+})
+
 /** Append-only (invariant #2): inserts only, never UPDATE/DELETE. */
 export const auditLog = pgTable("audit_log", {
   id: uuid("id").primaryKey().defaultRandom(),

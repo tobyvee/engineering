@@ -16,6 +16,7 @@ import {
   setTicketStatus,
 } from "@eng/db"
 import { createGitHubDelivery } from "@eng/integrations"
+import { persistenceFromEnv } from "../persistence"
 import { startTicketLifecycle } from "./client"
 
 /**
@@ -93,6 +94,25 @@ export async function implementTicket(ticketId: string): Promise<PullRequestRef 
       kind: "agent_step_skipped",
       ticketId,
       payload: { stage: "implementation", error: String(err) },
+    })
+  }
+
+  // Persist the implementation notes to the knowledge base (backend selected by PERSISTENCE_BACKEND).
+  try {
+    const doc = `# ${title}\n\n${goalContext}\n\n## Implementation notes\n\n${proposed?.summary ?? "(agent runtime unavailable)"}\n`
+    await persistenceFromEnv().knowledge.write(`tickets/${ticketId}.md`, doc)
+    await appendAudit({
+      actor: "staff_engineer",
+      kind: "knowledge_written",
+      ticketId,
+      payload: { path: `tickets/${ticketId}.md` },
+    })
+  } catch (err) {
+    await appendAudit({
+      actor: "system",
+      kind: "knowledge_skipped",
+      ticketId,
+      payload: { error: String(err) },
     })
   }
 

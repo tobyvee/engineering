@@ -25,9 +25,25 @@ full decisions log; this file is a snapshot inventory of what's been built.
 | `packages/core` | Domain heart (framework-agnostic) | zod schemas (`Mission→Goal→Epic→Ticket`, budgets, approvals, audit), 7 role personas, `Worker` / `DeliveryAdapter` / `IssueTracker` / `AuditLog` interfaces, budget helpers |
 | `packages/db` | Persistence | Drizzle schema (8 FK-linked tables), `repo.ts` (tickets/audit/trace-context), client, migrations `0000`+`0001` |
 | `packages/agents` | Agent runtime | `ClaudeWorker` (api/cli backends), `proposeFileChanges` + `parseProposal`, pricing, prompt builder |
-| `packages/integrations` | Delivery adapters | `GitHubDeliveryAdapter` (branch/commit/PR/checks/merge/deploy), `createGitHubDelivery` factory |
+| `packages/integrations` | GitHub adapters | `GitHubDeliveryAdapter` (branch/commit/PR/checks/merge/deploy), `GitHubIssueTracker` (issues), `GitHubKnowledgeBase` (repo docs via Contents API) + factories |
 | `apps/server` | Orchestration | Hono API (`app.ts`), Temporal `client`/`worker`/`workflows`/`activities`, heartbeat stub |
 | `apps/web` | Dashboard | React + Vite, TanStack Router/Query, Board/Approvals/Audit pages, typed API client |
+
+## Persistence (pluggable backends)
+
+The agents' state persists through **ports in `core`** — `IssueTracker`, `KnowledgeBase`, `AuditLog`
+— assembled by a **factory** (`createPersistence` / `persistenceFromEnv`) selected by
+`PERSISTENCE_BACKEND`. Swapping backends never touches `core` or the workflow.
+
+| Port | `postgres` backend | `github` backend |
+|------|--------------------|------------------|
+| Work items (`IssueTracker`) | `DbIssueTracker` | `GitHubIssueTracker` (issues; fields round-tripped in a metadata block) |
+| Knowledge / docs (`KnowledgeBase`) | `DbKnowledgeBase` (`kb_docs`) | `GitHubKnowledgeBase` (Markdown under `docs/` via the Contents API) |
+| Audit (`AuditLog`) | `DbAuditLog` | `DbAuditLog` (stays in Postgres — the dashboard read-model) |
+
+> GitHub Wikis have **no REST/GraphQL API** (only a `.wiki.git` repo), so the KB uses repo files —
+> the supported, reviewable equivalent. The implementation step persists notes to
+> `tickets/<id>.md` via the selected backend (verified live on Postgres).
 
 ## Settled decisions (with rejected alternatives)
 
@@ -90,7 +106,9 @@ human approval gates.
 
 ## Not yet built (honest gaps)
 
-- A GitHub-Issues / Linear / Jira `IssueTracker` (only the DB-backed one exists).
+- Linear / Jira `IssueTracker` backends (GitHub + Postgres exist); a literal GitHub Wiki
+  (`.wiki.git`) KB adapter; fully routing the tracker + audit through the factory (only the KB write
+  is wired into the workflow so far).
 - Earlier lifecycle stages (discovery/design/architecture by PM/UX/Architect) and work decomposition
   (Lead Engineer breaking epics into tickets) — the slice jumps straight to implementation.
 - No remote / CI for this repo itself.

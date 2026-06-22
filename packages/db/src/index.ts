@@ -1,4 +1,6 @@
+export { DbAuditLog } from "./audit-log"
 export { db } from "./client"
+export { DbKnowledgeBase } from "./knowledge"
 export * from "./repo"
 export * from "./schema"
 export { DbIssueTracker } from "./tracker"

@@ -15,6 +15,13 @@
       "when": 1782095640600,
       "tag": "0001_workable_venus",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1782100362993,
+      "tag": "0002_absent_vision",
+      "breakpoints": true
     }
   ]
 }
