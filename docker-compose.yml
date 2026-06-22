@@ -42,15 +42,32 @@ services:
     ports:
       - "8080:8080"
 
+  # One-shot: apply DB migrations, then exit. App services wait for it to finish.
+  migrate:
+    build:
+      context: .
+      dockerfile: apps/server/Dockerfile
+    image: engineering/app:local
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://postgres:postgres@postgres:5432/engineering
+    command: ["pnpm", "--filter", "@eng/db", "db:migrate"]
+    restart: "no"
+
   server:
     build:
       context: .
       dockerfile: apps/server/Dockerfile
+    image: engineering/app:local
     depends_on:
       postgres:
         condition: service_healthy
       temporal:
         condition: service_started
+      migrate:
+        condition: service_completed_successfully
     environment:
       PORT: 3000
       DATABASE_URL: postgres://postgres:postgres@postgres:5432/engineering
@@ -65,11 +82,14 @@ services:
     build:
       context: .
       dockerfile: apps/server/Dockerfile
+    image: engineering/app:local
     depends_on:
       postgres:
         condition: service_healthy
       temporal:
         condition: service_started
+      migrate:
+        condition: service_completed_successfully
     environment:
       DATABASE_URL: postgres://postgres:postgres@postgres:5432/engineering
       TEMPORAL_ADDRESS: temporal:7233

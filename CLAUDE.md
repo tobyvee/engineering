@@ -175,9 +175,10 @@ docker compose up -d     # or: pnpm docker:up
 docker compose down      # or: pnpm docker:down
 ```
 
-> Note: Compose does **not** yet run DB migrations automatically. After the stack is up, apply them
-> against the app DB once: `DATABASE_URL=postgres://postgres:postgres@localhost:5432/engineering
-> pnpm db:migrate`. (Wiring a migrate step into Compose is a `(target)` follow-up.)
+> Migrations run automatically: a one-shot `migrate` service applies `drizzle-kit migrate` once
+> Postgres is healthy, and `server` + `worker` gate on it via `service_completed_successfully`, so
+> `docker compose up` is migrations-included. To run them standalone: `docker compose run --rm migrate`.
+> (`migrate`, `server`, and `worker` share one built image, `engineering/app:local`.)
 
 ## Decisions
 
