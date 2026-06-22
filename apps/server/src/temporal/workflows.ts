@@ -4,15 +4,22 @@ import type * as activities from "./activities"
 const {
   transitionTicket,
   implementTicket,
+  verifyTicket,
   checkDeliveryStatus,
   mergeDelivery,
   startDeploy,
   checkDeployStatus,
   recordDeploy,
+  pickUpBacklog,
 } = proxyActivities<typeof activities>({
   startToCloseTimeout: "10 minutes",
   retry: { maximumAttempts: 3 },
 })
+
+/** Heartbeat: fired on a schedule; starts the lifecycle for any backlog tickets. */
+export async function heartbeat(): Promise<void> {
+  await pickUpBacklog()
+}
 
 /**
  * Human approval gates — the dashboard signals these to release the durable waits. One signal
@@ -50,6 +57,13 @@ export async function ticketLifecycle(ticketId: string): Promise<void> {
   // Agent writes the code and (when GitHub is configured) pushes a branch + opens a PR.
   const pr = await implementTicket(ticketId)
   await transitionTicket(ticketId, "in_review")
+
+  // QA quality gate: the QA agent verifies the acceptance criteria before review/merge.
+  const qaOk = await verifyTicket(ticketId)
+  if (!qaOk) {
+    await transitionTicket(ticketId, "blocked")
+    return
+  }
 
   // Wait for CI to settle, bounded. Skipped when there's no PR.
   if (pr) {

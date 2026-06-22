@@ -1,4 +1,4 @@
-import { proposeFileChanges } from "@eng/agents"
+import { assess, proposeFileChanges } from "@eng/agents"
 import {
   type DeliveryAdapter,
   type DeployState,
@@ -6,8 +6,17 @@ import {
   ROLES,
   type TicketStatus,
 } from "@eng/core"
-import { appendAudit, getTicket, getTraceContext, setTicketStatus } from "@eng/db"
+import {
+  addSpend,
+  appendAudit,
+  getBudgetRemaining,
+  getTicket,
+  getTraceContext,
+  listTickets,
+  setTicketStatus,
+} from "@eng/db"
 import { createGitHubDelivery } from "@eng/integrations"
+import { startTicketLifecycle } from "./client"
 
 /**
  * Activities are the side-effecting steps the durable workflow calls. They run in the normal Node
@@ -16,6 +25,15 @@ import { createGitHubDelivery } from "@eng/integrations"
  */
 export async function transitionTicket(ticketId: string, status: TicketStatus): Promise<void> {
   await setTicketStatus(ticketId, status)
+}
+
+/** Start the lifecycle for any `backlog` tickets (idempotent). Driven by the heartbeat schedule. */
+export async function pickUpBacklog(): Promise<number> {
+  const backlog = (await listTickets()).filter((t) => t.status === "backlog")
+  for (const ticket of backlog) {
+    await startTicketLifecycle(ticket.id)
+  }
+  return backlog.length
 }
 
 // --- Delivery (GitHub) -------------------------------------------------------
@@ -42,6 +60,9 @@ export async function implementTicket(ticketId: string): Promise<PullRequestRef 
   const [ticket, goalContext] = await Promise.all([getTicket(ticketId), getTraceContext(ticketId)])
   const title = ticket?.title ?? `Ticket ${ticketId}`
 
+  // Central budget enforcement (invariant #3): remaining = limit − spent from the budgets table.
+  const remaining = (await getBudgetRemaining(role.id)) ?? role.monthlyBudgetCents
+
   let proposed: Awaited<ReturnType<typeof proposeFileChanges>> | null = null
   try {
     proposed = await proposeFileChanges({
@@ -51,8 +72,9 @@ export async function implementTicket(ticketId: string): Promise<PullRequestRef 
       task: ticket
         ? `Implement ticket "${ticket.title}": ${ticket.description || "(no description provided)"}.`
         : `Implement ticket ${ticketId}.`,
-      budgetCentsRemaining: role.monthlyBudgetCents,
+      budgetCentsRemaining: remaining,
     })
+    await addSpend(role.id, proposed.costCents)
     await appendAudit({
       actor: "staff_engineer",
       kind: "agent_step",
@@ -61,6 +83,7 @@ export async function implementTicket(ticketId: string): Promise<PullRequestRef 
         stage: "implementation",
         summary: proposed.summary,
         costCents: proposed.costCents,
+        budgetRemaining: remaining,
         files: proposed.files.length,
       },
     })
@@ -119,6 +142,43 @@ export async function implementTicket(ticketId: string): Promise<PullRequestRef 
       payload: { phase: "push", branch, error: String(err) },
     })
     return null
+  }
+}
+
+/**
+ * QA quality gate: a QA/Test agent verifies the acceptance criteria. Returns false only on a real
+ * fail verdict; a QA runtime error (e.g. no credentials) records `qa_skipped` and does not block.
+ */
+export async function verifyTicket(ticketId: string): Promise<boolean> {
+  const role = ROLES.qa_test
+  const remaining = (await getBudgetRemaining(role.id)) ?? role.monthlyBudgetCents
+  const [ticket, goalContext] = await Promise.all([getTicket(ticketId), getTraceContext(ticketId)])
+  try {
+    const verdict = await assess({
+      role: role.id,
+      systemPrompt: role.systemPrompt,
+      goalContext,
+      task: ticket
+        ? `Verify ticket "${ticket.title}" meets its acceptance criteria: ${ticket.acceptanceCriteria.join("; ") || "(none specified)"}.`
+        : `Verify ticket ${ticketId}.`,
+      budgetCentsRemaining: remaining,
+    })
+    await addSpend(role.id, verdict.costCents)
+    await appendAudit({
+      actor: "qa_test",
+      kind: verdict.passed ? "qa_passed" : "qa_failed",
+      ticketId,
+      payload: { summary: verdict.summary, costCents: verdict.costCents },
+    })
+    return verdict.passed
+  } catch (err) {
+    await appendAudit({
+      actor: "system",
+      kind: "qa_skipped",
+      ticketId,
+      payload: { error: String(err) },
+    })
+    return true
   }
 }
 

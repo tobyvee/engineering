@@ -13,7 +13,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 > second human gate (ship) dispatches a GitHub Actions deploy (`workflow_dispatch`) and polls the run
 > to completion. Delivery + deploy are a no-op when unconfigured; both gates are human approvals. The
 > full lifecycle is implemented — a true end-to-end run just needs an `ANTHROPIC_API_KEY` + a GitHub
-> repo/token/deploy workflow.
+> repo/token/deploy workflow. A QA agent gates acceptance criteria (blocks on fail), per-role budgets
+> are enforced from the DB (limit−spent), and a Temporal Schedule auto-starts backlog tickets. It's
+> hardened with run-id deploy correlation, activity retries, and block-on-failure.
 > Sections marked _(target)_ describe intended behavior not yet wired; the "Decisions" section tracks
 > what is settled vs. still open.
 

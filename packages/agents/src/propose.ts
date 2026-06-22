@@ -36,7 +36,7 @@ export async function proposeFileChanges(input: ProposeChangesInput): Promise<Pr
   return { summary, files, costCents: result.costCents, stoppedReason: result.stoppedReason }
 }
 
-function extractJson(text: string): string | null {
+export function extractJson(text: string): string | null {
   const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/)
   const candidate = fenced?.[1] ?? text
   const start = candidate.indexOf("{")

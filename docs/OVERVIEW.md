@@ -51,6 +51,7 @@ full decisions log; this file is a snapshot inventory of what's been built.
 | implement | coding agent writes files (`proposeFileChanges`) | — |
 | branch + commit | Git Data API (`commitFiles`) | — |
 | PR + CI | `openPullRequest` → poll `getChecks` | — |
+| QA | QA agent verifies acceptance criteria (`verifyTicket`) | — (blocks on fail) |
 | merge | `mergeDelivery` | **human (merge)** |
 | deploy (ship) | `workflow_dispatch` → poll run | **human (deploy)** |
 
@@ -75,12 +76,23 @@ human approval gates.
 | Infra | `docker compose up` turnkey: Postgres → auto-migrate → Temporal → UI → server → worker → web |
 | Docs | `CLAUDE.md` (north-star + decisions), `README.md`, this overview |
 
+## Hardening & gaps closed (latest)
+
+| Area | Status |
+|------|--------|
+| Deploy run correlation | run-id based (latestRunId/deploymentRunAfter) — robust to clock skew |
+| Failure paths | Temporal retry policy; failed merge/deploy → ticket `blocked` (no longer reaches `done`) |
+| Observability | Audit view renders cost / PR+run links / deploy state / file count |
+| `IssueTracker` | concrete `DbIssueTracker` (Postgres-backed; conforms the store to the interface) |
+| Heartbeat | Temporal Schedule auto-starts `backlog` tickets (verified: ~5s pickup) |
+| Budgets | seeded per role; `implementTicket`/`verifyTicket` read remaining (limit−spent) and record spend |
+| QA/Test | QA agent verifies acceptance criteria after implementation; a fail blocks the ticket |
+
 ## Not yet built (honest gaps)
 
-- `IssueTracker` has no concrete implementation (interface only).
-- The heartbeat `scheduler.ts` is a stub.
-- Budgets are modeled and guarded in the worker but **not** centrally enforced in `core`.
-- QA/Test exists as a role persona but has no dedicated flow.
+- A GitHub-Issues / Linear / Jira `IssueTracker` (only the DB-backed one exists).
+- Earlier lifecycle stages (discovery/design/architecture by PM/UX/Architect) and work decomposition
+  (Lead Engineer breaking epics into tickets) — the slice jumps straight to implementation.
 - No remote / CI for this repo itself.
 - A true end-to-end run needs real credentials: `ANTHROPIC_API_KEY` + a GitHub repo / token / deploy
   workflow (it bills and creates real objects).

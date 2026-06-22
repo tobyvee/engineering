@@ -17,15 +17,21 @@ export function ticketWorkflowId(ticketId: string): string {
   return `ticket-${ticketId}`
 }
 
-/** Start the durable lifecycle for a ticket. Workflow/signal are referenced by name to keep the
- *  API process free of the workflow sandbox imports. */
+/** Start the durable lifecycle for a ticket. Idempotent — a ticket already started (e.g. by the
+ *  heartbeat) is a no-op. Workflow/signal are referenced by name to keep callers free of the
+ *  workflow sandbox imports. */
 export async function startTicketLifecycle(ticketId: string): Promise<void> {
   const client = await getTemporalClient()
-  await client.workflow.start("ticketLifecycle", {
-    taskQueue: TASK_QUEUE,
-    workflowId: ticketWorkflowId(ticketId),
-    args: [ticketId],
-  })
+  try {
+    await client.workflow.start("ticketLifecycle", {
+      taskQueue: TASK_QUEUE,
+      workflowId: ticketWorkflowId(ticketId),
+      args: [ticketId],
+    })
+  } catch (err) {
+    if ((err as { name?: string })?.name === "WorkflowExecutionAlreadyStartedError") return
+    throw err
+  }
 }
 
 /** Release an approval gate ("merge" or "deploy") by signaling the running workflow (invariant #4). */

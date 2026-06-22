@@ -1,6 +1,7 @@
 import type { Worker } from "@eng/core"
 import { ClaudeWorker, type ClaudeWorkerOptions } from "./claude-worker"
 
+export { type AssessInput, type Assessment, assess, parseVerdict } from "./assess"
 export type { ClaudeWorkerOptions, WorkerBackend, WorkerMode } from "./claude-worker"
 export { ClaudeWorker } from "./claude-worker"
 export { DEFAULT_MODEL } from "./prompt"
