@@ -131,6 +131,46 @@ li {
   color: var(--accent);
 }
 
+.input {
+  border: 1px solid var(--border);
+  background: #0e1014;
+  color: var(--fg);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 13px;
+}
+
+.input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.form {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 16px;
+}
+
+.sub-form {
+  margin: 8px 0 0;
+}
+
+.sub {
+  margin: 8px 0 0;
+  padding-left: 12px;
+  border-left: 1px solid var(--border);
+  gap: 4px;
+}
+
+.sub li {
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  padding: 2px 0;
+  color: var(--muted);
+}
+
 .muted {
   color: var(--muted);
   font-size: 14px;

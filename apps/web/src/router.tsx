@@ -2,6 +2,7 @@ import { createRootRoute, createRoute, createRouter, Link, Outlet } from "@tanst
 import { Approvals } from "./pages/Approvals"
 import { Audit } from "./pages/Audit"
 import { Board } from "./pages/Board"
+import { Roadmap } from "./pages/Roadmap"
 
 const rootRoute = createRootRoute({
   component: () => (
@@ -15,6 +16,9 @@ const rootRoute = createRootRoute({
           activeOptions={{ exact: true }}
         >
           Board
+        </Link>
+        <Link to="/roadmap" className="link" activeProps={{ className: "link active" }}>
+          Roadmap
         </Link>
         <Link to="/approvals" className="link" activeProps={{ className: "link active" }}>
           Approvals
@@ -31,6 +35,11 @@ const rootRoute = createRootRoute({
 })
 
 const boardRoute = createRoute({ getParentRoute: () => rootRoute, path: "/", component: Board })
+const roadmapRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/roadmap",
+  component: Roadmap,
+})
 const approvalsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/approvals",
@@ -42,7 +51,7 @@ const auditRoute = createRoute({
   component: Audit,
 })
 
-const routeTree = rootRoute.addChildren([boardRoute, approvalsRoute, auditRoute])
+const routeTree = rootRoute.addChildren([boardRoute, roadmapRoute, approvalsRoute, auditRoute])
 
 export const router = createRouter({ routeTree })
 
