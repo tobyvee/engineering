@@ -1,0 +1,19 @@
+{
+  "name": "@eng/integrations",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@eng/core": "workspace:*",
+    "octokit": "^5.0.5"
+  },
+  "devDependencies": {
+    "typescript": "^6.0.3"
+  }
+}

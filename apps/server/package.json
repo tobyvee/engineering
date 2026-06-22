@@ -1,0 +1,28 @@
+{
+  "name": "@eng/server",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "tsx src/index.ts",
+    "worker": "tsx src/worker.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@eng/agents": "workspace:*",
+    "@eng/core": "workspace:*",
+    "@eng/db": "workspace:*",
+    "@eng/integrations": "workspace:*",
+    "@hono/node-server": "^2.0.5",
+    "@temporalio/activity": "^1.18.1",
+    "@temporalio/client": "^1.18.1",
+    "@temporalio/worker": "^1.18.1",
+    "@temporalio/workflow": "^1.18.1",
+    "hono": "^4.12.26"
+  },
+  "devDependencies": {
+    "tsx": "^4.22.4",
+    "typescript": "^6.0.3"
+  }
+}
