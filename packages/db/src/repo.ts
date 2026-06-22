@@ -43,19 +43,17 @@ function toAudit(row: typeof auditLog.$inferSelect): AuditEvent {
 }
 
 /**
- * Ensure a parent Mission→Goal→Epic chain exists and return the epic id. Goal traceability
- * (invariant #1) means a ticket cannot exist without an epic, so this seeds the chain on first use.
- * Idempotent: reuses the existing epic if one is already present.
+ * Ensure the unit (with per-role budgets, invariant #3) and mission exist; return the mission id.
+ * Idempotent: reuses the existing mission. The root every goal hangs off.
  */
-export async function ensureSeedEpicId(): Promise<string> {
-  const existing = await db.select().from(epics).limit(1)
-  if (existing[0]) return existing[0].id
+async function ensureUnitMission(): Promise<string> {
+  const existing = (await db.select().from(missions).limit(1))[0]
+  if (existing) return existing.id
 
   const unit = firstOrThrow(
     await db.insert(units).values({ name: "Default Unit" }).returning(),
     "unit",
   )
-  // Seed a budget per role so spend can be enforced centrally (invariant #3).
   await db.insert(budgets).values(
     Object.values(ROLES).map((role) => ({
       unitId: unit.id,
@@ -71,25 +69,88 @@ export async function ensureSeedEpicId(): Promise<string> {
       .returning(),
     "mission",
   )
+  return mission.id
+}
+
+/** Ensure a default goal exists under the mission; return its id (the fallback epic parent). */
+async function ensureDefaultGoalId(): Promise<string> {
+  const existing = (await db.select().from(goals).limit(1))[0]
+  if (existing) return existing.id
+  const missionId = await ensureUnitMission()
   const goal = firstOrThrow(
     await db
       .insert(goals)
-      .values({
-        missionId: mission.id,
-        title: "Bootstrap the unit",
-        description: "Stand up delivery.",
-      })
+      .values({ missionId, title: "Bootstrap the unit", description: "Stand up delivery." })
       .returning(),
     "goal",
   )
+  return goal.id
+}
+
+/**
+ * Ensure a parent Mission→Goal→Epic chain exists and return the epic id. Goal traceability
+ * (invariant #1) means a ticket cannot exist without an epic, so this seeds the chain on first use.
+ * Idempotent: reuses the existing epic if one is already present.
+ */
+export async function ensureSeedEpicId(): Promise<string> {
+  const existing = (await db.select().from(epics).limit(1))[0]
+  if (existing) return existing.id
+  const goalId = await ensureDefaultGoalId()
   const epic = firstOrThrow(
     await db
       .insert(epics)
-      .values({ goalId: goal.id, title: "Vertical slice", description: "First end-to-end flow." })
+      .values({ goalId, title: "Vertical slice", description: "First end-to-end flow." })
       .returning(),
     "epic",
   )
   return epic.id
+}
+
+/** List goals (newest first) — for authoring tickets/epics under a chosen initiative. */
+export async function listGoals(): Promise<{ id: string; title: string }[]> {
+  return db.select({ id: goals.id, title: goals.title }).from(goals).orderBy(desc(goals.createdAt))
+}
+
+/** Author a goal under the mission (seeds the unit/mission on first use). */
+export async function createGoal(input: {
+  title: string
+  description?: string
+}): Promise<{ id: string; title: string }> {
+  const missionId = await ensureUnitMission()
+  const goal = firstOrThrow(
+    await db
+      .insert(goals)
+      .values({ missionId, title: input.title, description: input.description ?? "" })
+      .returning(),
+    "goal",
+  )
+  return { id: goal.id, title: goal.title }
+}
+
+/** List epics (newest first), optionally scoped to a goal. */
+export async function listEpics(goalId?: string): Promise<{ id: string; title: string }[]> {
+  return db
+    .select({ id: epics.id, title: epics.title })
+    .from(epics)
+    .where(goalId ? eq(epics.goalId, goalId) : undefined)
+    .orderBy(desc(epics.createdAt))
+}
+
+/** Author an epic under a goal (defaults to the seeded goal when `goalId` is omitted). */
+export async function createEpic(input: {
+  title: string
+  description?: string
+  goalId?: string
+}): Promise<{ id: string; title: string }> {
+  const goalId = input.goalId || (await ensureDefaultGoalId())
+  const epic = firstOrThrow(
+    await db
+      .insert(epics)
+      .values({ goalId, title: input.title, description: input.description ?? "" })
+      .returning(),
+    "epic",
+  )
+  return { id: epic.id, title: epic.title }
 }
 
 /** Insert a fully-specified ticket (all fields). Used by the IssueTracker. */

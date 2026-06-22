@@ -19,12 +19,41 @@ app.get("/api/tickets", async (c) => c.json({ tickets: await persistence.tracker
 app.get("/api/audit", async (c) => c.json({ events: await persistence.audit.query() }))
 app.get("/api/approvals", (c) => c.json({ approvals: [] }))
 
-// Create a ticket through the tracker (the DB backend seeds the Mission→Goal→Epic chain when the
-// epic is unset, per traceability invariant #1) and record it via the audit port.
+// Goal hierarchy authoring (through the persistence port, so the backend is swappable). Lets the
+// human/PM decompose work under multiple goals + epics; tickets then target a chosen epic.
+app.get("/api/goals", async (c) => c.json({ goals: await persistence.hierarchy.listGoals() }))
+app.post("/api/goals", async (c) => {
+  const body = (await c.req.json().catch(() => ({}))) as { title?: string; description?: string }
+  const goal = await persistence.hierarchy.createGoal({
+    title: body.title ?? "Untitled goal",
+    description: body.description,
+  })
+  return c.json({ goal }, 201)
+})
+
+app.get("/api/epics", async (c) =>
+  c.json({ epics: await persistence.hierarchy.listEpics(c.req.query("goalId")) }),
+)
+app.post("/api/epics", async (c) => {
+  const body = (await c.req.json().catch(() => ({}))) as {
+    title?: string
+    description?: string
+    goalId?: string
+  }
+  const epic = await persistence.hierarchy.createEpic({
+    title: body.title ?? "Untitled epic",
+    description: body.description,
+    goalId: body.goalId,
+  })
+  return c.json({ epic }, 201)
+})
+
+// Create a ticket through the tracker under a chosen epic (or seed the default Mission→Goal→Epic
+// chain when `epicId` is unset, per traceability invariant #1) and record it via the audit port.
 app.post("/api/tickets", async (c) => {
-  const body = (await c.req.json().catch(() => ({}))) as { title?: string }
+  const body = (await c.req.json().catch(() => ({}))) as { title?: string; epicId?: string }
   const ticket = await persistence.tracker.createTicket({
-    epicId: "",
+    epicId: body.epicId ?? "",
     title: body.title ?? "Demo ticket",
     description: "",
     status: "backlog",

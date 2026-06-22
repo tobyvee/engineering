@@ -39,7 +39,7 @@ The agents' state persists through **ports in `core`** — `IssueTracker`, `Know
 |------|--------------------|------------------|
 | Work items (`IssueTracker`) | `DbIssueTracker` | `GitHubIssueTracker` (issues; fields round-tripped in a metadata block) |
 | Knowledge / docs (`KnowledgeBase`) | `DbKnowledgeBase` (`kb_docs`) | `GitHubKnowledgeBase` (Markdown under `docs/` via the Contents API) |
-| Goal trace (`Hierarchy`) | `DbHierarchy` (mission→goal→epic join) | `GitHubHierarchy` (mission/goal/epic as native **sub-issues**; tickets are sub-issues of an epic) |
+| Goal hierarchy (`Hierarchy`) | `DbHierarchy` (rows + trace join; goal/epic authoring) | `GitHubHierarchy` (mission/goal/epic as native **sub-issues**; authoring creates + links them) |
 | Audit (`AuditLog`) | `DbAuditLog` | `DbAuditLog` (stays in Postgres — the dashboard read-model) |
 
 > GitHub Wikis have **no REST/GraphQL API** (only a `.wiki.git` repo), so the KB uses repo files —
@@ -51,7 +51,10 @@ via `persistence.hierarchy` — so `PERSISTENCE_BACKEND` governs where agent sta
 Postgres-direct — a control-plane concern.) On the GitHub backend the mission→goal→epic tree is
 modelled with **native GitHub sub-issues** (parent→child Issues labelled `type:*`); each ticket is
 linked as a sub-issue of its epic and `traceContext` walks the native parent chain (`GET
-.../issues/{n}/parent`). Verified live on Postgres; the GitHub adapters are unit-tested.
+.../issues/{n}/parent`). Goals and epics are **authored through the same port**
+(`createGoal`/`createEpic`/`listGoals`/`listEpics`, exposed at `/api/goals` + `/api/epics`), and a
+ticket can target a chosen epic (`POST /api/tickets {epicId}`) — so work decomposes under multiple
+epics. Verified live on Postgres (authoring + targeting); the GitHub adapters are unit-tested.
 
 ## Settled decisions (with rejected alternatives)
 
@@ -94,7 +97,7 @@ human approval gates.
 
 | Item | State |
 |------|-------|
-| Quality gates | typecheck 6/6 · tests 38/38 · Biome lint clean |
+| Quality gates | typecheck 6/6 · tests 42/42 · Biome lint clean |
 | Live-proven | vertical slice, delivery loop, both human gates (on Postgres + Temporal) |
 | Unit-tested (no live creds) | GitHub adapter (branch/PR/checks/merge/commit/deploy), `parseProposal`, pricing/budget |
 | Infra | `docker compose up` turnkey: Postgres → auto-migrate → Temporal → UI → server → worker → web |
@@ -115,8 +118,8 @@ human approval gates.
 ## Not yet built (honest gaps)
 
 - Linear / Jira `IssueTracker` backends (GitHub + Postgres exist); a literal GitHub Wiki
-  (`.wiki.git`) KB adapter; multi-epic/goal authoring on GitHub (the sub-issue seed creates a single
-  default mission→goal→epic chain — PM/Lead Engineer decomposing work into many is the next step).
+  (`.wiki.git`) KB adapter; a dashboard UI for authoring goals/epics (the API + ports exist; the web
+  app doesn't surface them yet).
 - Earlier lifecycle stages (discovery/design/architecture by PM/UX/Architect) and work decomposition
   (Lead Engineer breaking epics into tickets) — the slice jumps straight to implementation.
 - No remote / CI for this repo itself.

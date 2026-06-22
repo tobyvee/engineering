@@ -1,4 +1,4 @@
-import type { Hierarchy } from "@eng/core"
+import type { Hierarchy, HierarchyNode } from "@eng/core"
 import type { Octokit } from "octokit"
 
 function issueNumber(id: string): number {
@@ -17,9 +17,9 @@ interface ParentIssue {
 
 /**
  * Hierarchy backed by **native GitHub sub-issues**. Mission/Goal/Epic are issues (labelled
- * `type:mission|goal|epic`) linked as parent→child; tickets are sub-issues of an epic.
- * `traceContext` walks the native parent chain — the GitHub-native model. (Sub-issue endpoints take
- * the issue's database `id`, not its number.)
+ * `type:mission|goal|epic`) linked as parent→child; tickets are sub-issues of an epic. `traceContext`
+ * walks the native parent chain, and goals/epics can be authored so work decomposes under multiple
+ * epics. (Sub-issue endpoints take the issue's database `id`, not its number.)
  */
 export class GitHubHierarchy implements Hierarchy {
   constructor(
@@ -42,28 +42,83 @@ export class GitHubHierarchy implements Hierarchy {
     ].join("\n")
   }
 
+  async listGoals(): Promise<HierarchyNode[]> {
+    return this.byLabel("type:goal")
+  }
+
+  async createGoal(input: { title: string; description?: string }): Promise<HierarchyNode> {
+    const missionNumber = await this.ensureMission()
+    const goal = await this.create(input.title, input.description ?? "", "type:goal")
+    await this.link(missionNumber, goal.id)
+    return { id: String(goal.number), title: input.title }
+  }
+
+  async listEpics(goalId?: string): Promise<HierarchyNode[]> {
+    if (goalId) return this.subIssues(Number(goalId))
+    return this.byLabel("type:epic")
+  }
+
+  async createEpic(input: {
+    title: string
+    description?: string
+    goalId?: string
+  }): Promise<HierarchyNode> {
+    const goalNumber = input.goalId ? Number(input.goalId) : await this.ensureDefaultGoal()
+    const epic = await this.create(input.title, input.description ?? "", "type:epic")
+    await this.link(goalNumber, epic.id)
+    return { id: String(epic.number), title: input.title }
+  }
+
   /** Ensure mission→goal→epic issues exist (linked as sub-issues); return the epic issue number. */
   async ensureSeedEpicId(): Promise<string> {
-    const { data } = await this.octokit.rest.issues.listForRepo({
-      ...this.repo,
-      labels: "type:epic",
-      state: "all",
-      per_page: 1,
-    })
-    const existing = data[0]
-    if (existing) return String(existing.number)
-
-    const mission = await this.create("Deliver the product", "Ship value to users.", "type:mission")
-    const goal = await this.create("Bootstrap the unit", "Stand up delivery.", "type:goal")
+    const existing = (await this.byLabel("type:epic"))[0]
+    if (existing) return existing.id
+    const goalNumber = await this.ensureDefaultGoal()
     const epic = await this.create("Vertical slice", "First end-to-end flow.", "type:epic")
-    await this.link(mission.number, goal.id)
-    await this.link(goal.number, epic.id)
+    await this.link(goalNumber, epic.id)
     return String(epic.number)
   }
 
   /** Link a ticket issue (database id) as a sub-issue of an epic (issue number). */
   async attachTicket(epicId: string, ticketIssueId: number): Promise<void> {
     await this.link(Number(epicId), ticketIssueId)
+  }
+
+  private async ensureMission(): Promise<number> {
+    const existing = (await this.byLabel("type:mission"))[0]
+    if (existing) return Number(existing.id)
+    const mission = await this.create("Deliver the product", "Ship value to users.", "type:mission")
+    return mission.number
+  }
+
+  private async ensureDefaultGoal(): Promise<number> {
+    const existing = (await this.byLabel("type:goal"))[0]
+    if (existing) return Number(existing.id)
+    const missionNumber = await this.ensureMission()
+    const goal = await this.create("Bootstrap the unit", "Stand up delivery.", "type:goal")
+    await this.link(missionNumber, goal.id)
+    return goal.number
+  }
+
+  private async byLabel(label: string): Promise<HierarchyNode[]> {
+    const { data } = await this.octokit.rest.issues.listForRepo({
+      ...this.repo,
+      labels: label,
+      state: "all",
+      per_page: 100,
+    })
+    return data.map((i) => ({ id: String(i.number), title: i.title }))
+  }
+
+  private async subIssues(parentNumber: number): Promise<HierarchyNode[]> {
+    const { data } = await this.octokit.request(
+      "GET /repos/{owner}/{repo}/issues/{issue_number}/sub_issues",
+      { ...this.repo, issue_number: parentNumber },
+    )
+    return (data as { number: number; title: string }[]).map((i) => ({
+      id: String(i.number),
+      title: i.title,
+    }))
   }
 
   private async create(
