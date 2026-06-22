@@ -6,8 +6,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 > `typecheck`/`lint`/`test`. A real end-to-end slice works against Postgres + Temporal: create a
 > ticket → a durable workflow advances it `planned → in_progress → in_review`, blocks at a human
 > approval gate (a Temporal Signal), then completes on approval — every transition persisted and
-> appended to the audit log, with the Mission→Goal→Epic chain seeded for traceability. Still stubbed:
-> Claude Agent SDK sessions (`runAgentStep` only records the step) and the GitHub delivery loop.
+> appended to the audit log, with the Mission→Goal→Epic chain seeded for traceability. The Claude
+> worker is implemented — `runAgentStep` runs `ClaudeWorker` (Anthropic API or `claude -p` CLI
+> backends) within budget and records the result. Still stubbed: the GitHub delivery loop.
 > Sections marked _(target)_ describe intended behavior not yet wired; the "Decisions" section tracks
 > what is settled vs. still open.
 
@@ -65,7 +66,7 @@ apps/
   web/           # React + Vite dashboard (TanStack Router + Query) for the human lead
 packages/
   core/          # Domain model + orchestration logic. Framework-agnostic. The heart.
-  agents/        # Worker runtime: Claude Agent SDK adapter, role configs, tool implementations
+  agents/        # Worker runtime: ClaudeWorker (Anthropic API + `claude -p` CLI backends), pricing
   integrations/  # DeliveryAdapter implementations (git host, CI, issue tracker)
   db/            # Postgres schema + migrations; shared by server
 ```
@@ -79,7 +80,7 @@ Shared zod schemas / TypeScript types live in `core` and are consumed by both `s
 different tool:
 
 1. **Agent step** — one model+tools reasoning loop (e.g. a Staff Eng agent working a ticket). Owned
-   by the **Claude Agent SDK** (the default `Worker`).
+   by the **Claude worker** (the default `Worker`: Anthropic API or `claude -p` CLI).
 2. **Decisioning** — what to do *next*. The **LLM decides dynamically**; we do **not** author a static
    DAG up front.
 3. **Durability** — long-running work that survives restarts, retries, and pauses for human approval.
@@ -90,7 +91,8 @@ Concretely:
 - **Heartbeat scheduler** (in `server`): agents wake on a schedule or on an assignment/event, check
   their queue, act, report, and sleep. Sessions persist across restarts (this is the durability layer).
 - **Each agent run is a `Worker` session**: role system prompt + scoped tool set + budget + full
-  audit capture. The default `Worker` implementation wraps the **Claude Agent SDK**.
+  audit capture. The default `Worker` (`ClaudeWorker`) runs each session via the **Anthropic Messages
+  API** (`@anthropic-ai/sdk`) or the **`claude -p` CLI** (stdio), selectable by mode (`WORKER_MODE`).
 - **The lifecycle is a durable state machine, not a batch DAG.** Stages (`discovery → design →
   architecture → implementation → review → ship`) are *states with human gates*; review can bounce
   work back and blockers loop. The pipeline shape is real, but routing is agent-driven and cyclic.
@@ -112,7 +114,7 @@ approves" — i.e. durable execution. **Chosen: Temporal.** Evaluated options (a
 **Deliberately NOT used** (don't re-litigate or reach for these):
 - **Dagster / Prefect** — Python-first (conflicts with the TS stack and the no-Python preference) and
   built for *deterministic scheduled data DAGs*, not dynamic agent-driven routing. Wrong paradigm.
-- **LangChain** as an orchestrator — overlaps the Claude Agent SDK (two agent loops) and pulls in a
+- **LangChain** as an orchestrator — overlaps the Claude worker's own agent loop (two agent loops) and pulls in a
   provider-agnostic abstraction we don't want as a Claude-first project. (`LangGraph.js` is the only
   piece worth revisiting *if* we later want explicitly graph-structured multi-agent control flow.)
 
@@ -184,7 +186,7 @@ docker compose down      # or: pnpm docker:down
 - **Scope:** one cross-functional engineering unit, full product-development lifecycle (not multi-company).
 - **Roles (7):** PM · UX/Design · Lead Architect · Lead System Design · Lead Engineer · Staff Engineers (IC) · QA/Test.
 - **API framework:** Hono. **Lint/format:** Biome. **Tests:** Vitest. **DB:** Postgres + Drizzle. **Validation:** zod.
-- **Orchestration:** Claude Agent SDK (agent step) + **Temporal** (self-hosted, MIT) for the durable
+- **Orchestration:** Claude worker — Anthropic API + `claude -p` CLI (agent step) + **Temporal** (self-hosted, MIT) for the durable
   workflow layer; state machine, not a DAG. **Not** Dagster/Prefect/LangChain/Inngest/pg-boss (see
   Orchestration for why).
 - **Delivery:** first `DeliveryAdapter` targets **GitHub**; hybrid rollout (coordination first,
@@ -194,7 +196,7 @@ docker compose down      # or: pnpm docker:down
   would duplicate `apps/server` and tempt direct DB access from the UI.)
 
 **Working assumptions (confirm or redirect):**
-- _Agent runtime:_ Claude-first — Claude Agent SDK as default `Worker`, pluggable behind the interface.
+- _Agent runtime:_ Claude-first — `ClaudeWorker` (Anthropic API + `claude -p` CLI backends) as the default `Worker`, pluggable behind the interface.
 - _Interface:_ API-first core + self-hosted web dashboard; human = accountable lead with approval gates.
 
 **Still open:**

@@ -102,6 +102,38 @@ export async function getTicket(id: string): Promise<Ticket | null> {
   return row ? toTicket(row) : null
 }
 
+/**
+ * Resolve a ticket's full traceability chain (mission → goal → epic → ticket) as a prompt-ready
+ * string. This is the "why" injected into every agent session (invariant #1).
+ */
+export async function getTraceContext(ticketId: string): Promise<string> {
+  const row = (
+    await db
+      .select({
+        ticketTitle: tickets.title,
+        epicTitle: epics.title,
+        goalTitle: goals.title,
+        goalDescription: goals.description,
+        missionTitle: missions.title,
+        missionStatement: missions.statement,
+      })
+      .from(tickets)
+      .innerJoin(epics, eq(tickets.epicId, epics.id))
+      .innerJoin(goals, eq(epics.goalId, goals.id))
+      .innerJoin(missions, eq(goals.missionId, missions.id))
+      .where(eq(tickets.id, ticketId))
+      .limit(1)
+  )[0]
+
+  if (!row) return `Ticket ${ticketId} (no trace context found).`
+  return [
+    `Mission: ${row.missionTitle} — ${row.missionStatement}`,
+    `Goal: ${row.goalTitle} — ${row.goalDescription}`,
+    `Epic: ${row.epicTitle}`,
+    `Ticket: ${row.ticketTitle}`,
+  ].join("\n")
+}
+
 export async function setTicketStatus(id: string, status: TicketStatus): Promise<void> {
   await db.update(tickets).set({ status, updatedAt: new Date() }).where(eq(tickets.id, id))
   await appendAudit({ actor: "system", kind: "state_change", ticketId: id, payload: { status } })
