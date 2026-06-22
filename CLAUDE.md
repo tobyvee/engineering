@@ -2,12 +2,14 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-> **Status: scaffolded skeleton.** The pnpm + Turborepo monorepo is in place and `typecheck`,
-> `lint`, and `test` pass; the Hono API boots and serves `/health`, and a Docker Compose stack brings
-> up Postgres + Temporal. The domain model and boundary interfaces are real; the runtime integrations
-> behind them — Claude Agent SDK sessions, the GitHub delivery loop, and DB/Temporal persistence —
-> are stubbed with `TODO`s. Sections marked _(target)_ describe intended behavior not yet wired. The
-> "Decisions" section at the bottom tracks what is settled vs. still open.
+> **Status: skeleton + first vertical slice.** The pnpm + Turborepo monorepo passes
+> `typecheck`/`lint`/`test`. A real end-to-end slice works against Postgres + Temporal: create a
+> ticket → a durable workflow advances it `planned → in_progress → in_review`, blocks at a human
+> approval gate (a Temporal Signal), then completes on approval — every transition persisted and
+> appended to the audit log, with the Mission→Goal→Epic chain seeded for traceability. Still stubbed:
+> Claude Agent SDK sessions (`runAgentStep` only records the step) and the GitHub delivery loop.
+> Sections marked _(target)_ describe intended behavior not yet wired; the "Decisions" section tracks
+> what is settled vs. still open.
 
 ## What we're building
 
@@ -166,10 +168,14 @@ pnpm vitest -t "<name>"  # single test by name
 pnpm db:generate         # drizzle-kit: generate migration from schema
 pnpm db:migrate          # drizzle-kit: apply migrations
 
-# Full local stack (Postgres + Temporal + Temporal UI + server + worker):
+# Full local stack (Postgres + Temporal + Temporal UI + server + worker + web):
 docker compose up -d     # or: pnpm docker:up
 docker compose down      # or: pnpm docker:down
 ```
+
+> Note: Compose does **not** yet run DB migrations automatically. After the stack is up, apply them
+> against the app DB once: `DATABASE_URL=postgres://postgres:postgres@localhost:5432/engineering
+> pnpm db:migrate`. (Wiring a migrate step into Compose is a `(target)` follow-up.)
 
 ## Decisions
 

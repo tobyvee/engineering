@@ -1,8 +1,36 @@
 import { Client, Connection } from "@temporalio/client"
 
-export async function createTemporalClient(): Promise<Client> {
-  const connection = await Connection.connect({
-    address: process.env.TEMPORAL_ADDRESS ?? "localhost:7233",
+const TASK_QUEUE = process.env.TEMPORAL_TASK_QUEUE ?? "engineering"
+
+let clientPromise: Promise<Client> | undefined
+
+export async function getTemporalClient(): Promise<Client> {
+  if (!clientPromise) {
+    clientPromise = Connection.connect({
+      address: process.env.TEMPORAL_ADDRESS ?? "localhost:7233",
+    }).then((connection) => new Client({ connection }))
+  }
+  return clientPromise
+}
+
+export function ticketWorkflowId(ticketId: string): string {
+  return `ticket-${ticketId}`
+}
+
+/** Start the durable lifecycle for a ticket. Workflow/signal are referenced by name to keep the
+ *  API process free of the workflow sandbox imports. */
+export async function startTicketLifecycle(ticketId: string): Promise<void> {
+  const client = await getTemporalClient()
+  await client.workflow.start("ticketLifecycle", {
+    taskQueue: TASK_QUEUE,
+    workflowId: ticketWorkflowId(ticketId),
+    args: [ticketId],
   })
-  return new Client({ connection })
+}
+
+/** Release the approval gate by signaling the running workflow (invariant #4). */
+export async function approveTicket(ticketId: string): Promise<void> {
+  const client = await getTemporalClient()
+  const handle = client.workflow.getHandle(ticketWorkflowId(ticketId))
+  await handle.signal("approve", true)
 }

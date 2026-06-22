@@ -6,10 +6,23 @@ async function getJson<T>(path: string): Promise<T> {
   return res.json() as Promise<T>
 }
 
-/** Typed client over the Hono read-views. Shapes come straight from `@eng/core`. */
+async function postJson<T>(path: string, body?: unknown): Promise<T> {
+  const res = await fetch(path, {
+    method: "POST",
+    headers: body ? { "content-type": "application/json" } : undefined,
+    body: body ? JSON.stringify(body) : undefined,
+  })
+  if (!res.ok) throw new Error(`${path} → ${res.status}`)
+  return res.json() as Promise<T>
+}
+
+/** Typed client over the Hono API. Shapes come straight from `@eng/core`. */
 export const api = {
   health: () => getJson<{ ok: boolean }>("/health"),
   tickets: () => getJson<{ tickets: Ticket[] }>("/api/tickets").then((r) => r.tickets),
   approvals: () => getJson<{ approvals: Approval[] }>("/api/approvals").then((r) => r.approvals),
   audit: () => getJson<{ events: AuditEvent[] }>("/api/audit").then((r) => r.events),
+  createTicket: (title: string) => postJson<{ ticket: Ticket }>("/api/tickets", { title }),
+  startTicket: (id: string) => postJson<{ started: boolean }>(`/api/tickets/${id}/start`),
+  approveTicket: (id: string) => postJson<{ signaled: boolean }>(`/api/tickets/${id}/approve`),
 }

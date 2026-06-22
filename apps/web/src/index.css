@@ -77,6 +77,60 @@ li {
   font-size: 14px;
 }
 
+.row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.ticket {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.actions {
+  display: flex;
+  gap: 8px;
+}
+
+.badge {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: #0e1014;
+  color: var(--muted);
+  font-size: 12px;
+  font-variant: tabular-nums;
+}
+
+.btn {
+  appearance: none;
+  border: 1px solid var(--border);
+  background: #1b1f26;
+  color: var(--fg);
+  border-radius: 6px;
+  padding: 6px 12px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.btn:hover {
+  border-color: var(--accent);
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.btn.approve {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
 .muted {
   color: var(--muted);
   font-size: 14px;
