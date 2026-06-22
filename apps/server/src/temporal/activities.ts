@@ -90,6 +90,26 @@ export async function runShapingStage(epicId: string, stageKey: string): Promise
   }
 }
 
+/** Record that an epic's plan is awaiting the human roadmap sign-off (the gate is pending). */
+export async function requestRoadmapSignoff(epicId: string): Promise<void> {
+  await persistence.audit.append({
+    actor: "lead_engineer",
+    kind: "roadmap_requested",
+    ticketId: null,
+    payload: { epicId },
+  })
+}
+
+/** Record the human roadmap sign-off (the gate released decomposition). */
+export async function recordRoadmapApproval(epicId: string): Promise<void> {
+  await persistence.audit.append({
+    actor: "human",
+    kind: "roadmap_approved",
+    ticketId: null,
+    payload: { epicId },
+  })
+}
+
 /**
  * Agent-driven decomposition: the Lead Engineer agent breaks an epic into implementable tickets,
  * each created in `backlog` under the epic (traceable, invariant #1) and audited. The epic's why

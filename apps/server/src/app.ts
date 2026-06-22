@@ -2,6 +2,7 @@ import { Hono } from "hono"
 import { persistenceFromEnv } from "./persistence"
 import { artifactPath, SHAPING_STAGES } from "./shaping"
 import {
+  approveRoadmap,
   approveTicket,
   startEpicDecomposition,
   startEpicShaping,
@@ -23,7 +24,27 @@ app.get("/health", (c) => c.json({ ok: true }))
 
 app.get("/api/tickets", async (c) => c.json({ tickets: await persistence.tracker.list() }))
 app.get("/api/audit", async (c) => c.json({ events: await persistence.audit.query() }))
-app.get("/api/approvals", (c) => c.json({ approvals: [] }))
+// Pending human gates, derived from the audit log. A roadmap sign-off is pending when the latest
+// roadmap-lifecycle event for an epic is `roadmap_requested` (not yet approved/decomposed).
+app.get("/api/approvals", async (c) => {
+  const events = await persistence.audit.query()
+  const seen = new Set<string>()
+  const pending: { epicId: string; kind: string; at: string }[] = []
+  for (const e of events) {
+    const epicId = typeof e.payload?.epicId === "string" ? (e.payload.epicId as string) : null
+    if (!epicId || seen.has(epicId)) continue
+    if (
+      e.kind === "roadmap_requested" ||
+      e.kind === "roadmap_approved" ||
+      e.kind === "epic_decomposed" ||
+      e.kind === "decomposition_skipped"
+    ) {
+      seen.add(epicId)
+      if (e.kind === "roadmap_requested") pending.push({ epicId, kind: "roadmap", at: e.at })
+    }
+  }
+  return c.json({ approvals: pending })
+})
 
 // Goal hierarchy authoring (through the persistence port, so the backend is swappable). Lets the
 // human/PM decompose work under multiple goals + epics; tickets then target a chosen epic.
@@ -72,12 +93,19 @@ app.get("/api/epics/:id/artifacts", async (c) => {
   return c.json({ artifacts })
 })
 
-// Agent-driven decomposition: the Lead Engineer breaks the epic into backlog tickets. Durable +
-// retried, so it goes through Temporal like other agent work.
+// Agent-driven decomposition: the Lead Engineer breaks the epic into backlog tickets — but behind a
+// roadmap sign-off gate (the workflow blocks until the human approves the plan, below).
 app.post("/api/epics/:id/decompose", async (c) => {
   const id = c.req.param("id")
   await startEpicDecomposition(id)
   return c.json({ epicId: id, decomposing: true })
+})
+
+// Roadmap sign-off (invariant #4): release the gate so decomposition proceeds.
+app.post("/api/epics/:id/approve-roadmap", async (c) => {
+  const id = c.req.param("id")
+  const signaled = await approveRoadmap(id)
+  return c.json({ epicId: id, gate: "roadmap", signaled })
 })
 
 // Create a ticket through the tracker under a chosen epic (or seed the default Mission→Goal→Epic

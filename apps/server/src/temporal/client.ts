@@ -64,6 +64,19 @@ export async function startEpicDecomposition(epicId: string): Promise<void> {
   }
 }
 
+/** Release the roadmap sign-off gate for an epic. Returns false if no decomposition is waiting
+ *  (already decomposed, or never started) — a benign no-op for the UI. */
+export async function approveRoadmap(epicId: string): Promise<boolean> {
+  const client = await getTemporalClient()
+  const handle = client.workflow.getHandle(`epic-decompose-${epicId}`)
+  try {
+    await handle.signal("roadmapApprove")
+    return true
+  } catch {
+    return false
+  }
+}
+
 /** Release an approval gate ("merge" or "deploy") by signaling the running workflow (invariant #4). */
 export async function approveTicket(ticketId: string, gate: "merge" | "deploy"): Promise<void> {
   const client = await getTemporalClient()

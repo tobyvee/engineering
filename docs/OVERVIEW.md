@@ -75,7 +75,7 @@ epics. Verified live on Postgres (authoring + targeting); the GitHub adapters ar
 | Stage | Mechanism | Gate |
 |-------|-----------|------|
 | shape (discovery → design → architecture → system design) | PM / UX / Architect / System Design agents draft artifacts (`epicShaping` → `draft`) | — |
-| decompose | Lead Engineer agent → backlog tickets (`epicDecomposition` → `proposeTickets`) | — |
+| decompose | Lead Engineer agent → backlog tickets (`epicDecomposition` → `proposeTickets`) | **human (roadmap)** |
 | plan → in_progress | Temporal workflow + status transitions | — |
 | implement | coding agent writes files (`proposeFileChanges`) | — |
 | branch + commit | Git Data API (`commitFiles`) | — |
@@ -89,7 +89,7 @@ Full path:
 ```
 Epic-level (agent planning, durable Temporal workflows):
   epic → SHAPE (PM discovery → UX design → architecture ADR → system design — artifacts to the KB)
-       → DECOMPOSE (Lead Engineer → backlog tickets under the epic, informed by the artifacts)
+       → [roadmap sign-off] → DECOMPOSE (Lead Engineer → backlog tickets, informed by the artifacts)
 
 Each ticket then runs the delivery lifecycle:
   ticket → plan → CODE (agent writes files) → branch + commit → PR
@@ -97,8 +97,8 @@ Each ticket then runs the delivery lifecycle:
          → deploying → [deploy approval] → dispatch GitHub Actions deploy → poll run → done
 ```
 
-Durable across restarts (Temporal), append-only audited, goal-traceable, budget-governed, with two
-human approval gates. Every stage is a role agent (PM · UX · Architect · System Design · Lead Engineer
+Durable across restarts (Temporal), append-only audited, goal-traceable, budget-governed, with three
+human approval gates (roadmap · merge · deploy). Every stage is a role agent (PM · UX · Architect · System Design · Lead Engineer
 · Staff Eng · QA — all seven) running behind the central budget + audit.
 
 ## Verification & meta
@@ -106,7 +106,7 @@ human approval gates. Every stage is a role agent (PM · UX · Architect · Syst
 | Item | State |
 |------|-------|
 | Quality gates | typecheck 6/6 · tests 47/47 · web build · Biome lint clean |
-| Live-proven | vertical slice, delivery loop, both human gates, goal/epic authoring; agent planning — shaping (PM→UX→Architect→System Design, 4 stages) + decomposition — wired API→Temporal→agent→audit (Postgres + Temporal) |
+| Live-proven | vertical slice, delivery loop, all three human gates (roadmap blocks→releases decomposition; merge; deploy), goal/epic authoring; agent planning — shaping (PM→UX→Architect→System Design, 4 stages) + gated decomposition — wired API→Temporal→agent→audit (Postgres + Temporal) |
 | Unit-tested (no live creds) | GitHub adapter (branch/PR/checks/merge/commit/deploy), `parseProposal`/`parseTickets`, `draft`/worker budget guards, pricing/budget |
 | Infra | `docker compose up` turnkey: Postgres → auto-migrate → Temporal → UI → server → worker → web |
 | Docs | `CLAUDE.md` (north-star + decisions), `README.md`, this overview |
@@ -122,14 +122,15 @@ human approval gates. Every stage is a role agent (PM · UX · Architect · Syst
 | Heartbeat | Temporal Schedule auto-starts `backlog` tickets (verified: ~5s pickup) |
 | Budgets | seeded per role; `implementTicket`/`verifyTicket` read remaining (limit−spent) and record spend |
 | QA/Test | QA agent verifies acceptance criteria after implementation; a fail blocks the ticket |
+| Roadmap gate | `epicDecomposition` blocks on a human sign-off before tickets are created; pending gates surface on the Approvals page (derived from the audit log) |
 | Decomposition | Lead Engineer agent breaks an epic into backlog tickets (`epicDecomposition` workflow); each ticket then runs its own lifecycle |
 
 ## Not yet built (honest gaps)
 
 - Linear / Jira `IssueTracker` backends (GitHub + Postgres exist); a literal GitHub Wiki
   (`.wiki.git`) KB adapter.
-- **All seven roles now drive a stage.** Shaping/decomposition have no human gate yet (a roadmap
-  sign-off could gate the plan before tickets reach the backlog).
+- **All seven roles drive a stage, behind three human gates** (roadmap · merge · deploy). The plan
+  itself is now gated; shaping (the upstream artifacts) still runs ungated.
 - No remote / CI for this repo itself.
 - A true end-to-end run needs real credentials: `ANTHROPIC_API_KEY` + a GitHub repo / token / deploy
   workflow (it bills and creates real objects).

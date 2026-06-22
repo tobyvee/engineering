@@ -14,10 +14,15 @@ const {
   pickUpBacklog,
   decomposeEpic,
   runShapingStage,
+  requestRoadmapSignoff,
+  recordRoadmapApproval,
 } = proxyActivities<typeof activities>({
   startToCloseTimeout: "10 minutes",
   retry: { maximumAttempts: 3 },
 })
+
+/** Roadmap sign-off gate — the dashboard signals this to release an epic's decomposition. */
+export const roadmapSignal = defineSignal("roadmapApprove")
 
 /** Heartbeat: fired on a schedule; starts the lifecycle for any backlog tickets. */
 export async function heartbeat(): Promise<void> {
@@ -36,11 +41,20 @@ export async function epicShaping(epicId: string): Promise<void> {
 }
 
 /**
- * Agent-driven decomposition as a durable step: the Lead Engineer breaks the epic into backlog
- * tickets (retried on failure). Each ticket then runs its own `ticketLifecycle` (started by the
- * human on the Board, or auto-picked by the heartbeat).
+ * Agent-driven decomposition behind a human roadmap sign-off gate (invariant #4): the workflow
+ * requests sign-off and *blocks* until the lead approves the plan, then the Lead Engineer breaks the
+ * epic into backlog tickets (retried on failure). Each ticket then runs its own `ticketLifecycle`
+ * (started by the human on the Board, or auto-picked by the heartbeat).
  */
 export async function epicDecomposition(epicId: string): Promise<void> {
+  let approved = false
+  setHandler(roadmapSignal, () => {
+    approved = true
+  })
+
+  await requestRoadmapSignoff(epicId)
+  await condition(() => approved)
+  await recordRoadmapApproval(epicId)
   await decomposeEpic(epicId)
 }
 

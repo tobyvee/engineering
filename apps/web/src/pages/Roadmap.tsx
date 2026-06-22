@@ -19,8 +19,15 @@ function EpicRow({ epic }: { epic: HierarchyNode }) {
   })
   const decompose = useMutation({
     mutationFn: () => api.decomposeEpic(epic.id),
-    // New tickets land in backlog — refresh the Board's view.
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["tickets"] }),
+    // Requests the plan behind a roadmap gate — surfaces on the Approvals page.
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["approvals"] }),
+  })
+  const approveRoadmap = useMutation({
+    mutationFn: () => api.approveRoadmap(epic.id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["approvals"] })
+      qc.invalidateQueries({ queryKey: ["tickets"] })
+    },
   })
 
   const docs = artifacts ?? []
@@ -43,9 +50,18 @@ function EpicRow({ epic }: { epic: HierarchyNode }) {
             type="button"
             onClick={() => decompose.mutate()}
             disabled={decompose.isPending}
-            title="Lead Engineer agent breaks this epic into tickets"
+            title="Request the plan: Lead Engineer breaks this epic into tickets, behind a roadmap sign-off gate"
           >
             Decompose
+          </button>
+          <button
+            className="btn approve"
+            type="button"
+            onClick={() => approveRoadmap.mutate()}
+            disabled={approveRoadmap.isPending}
+            title="Sign off on the plan — releases the Lead Engineer to create the tickets"
+          >
+            Approve roadmap
           </button>
           <button className="btn" type="button" onClick={() => setOpen((o) => !o)}>
             {open ? "Hide" : "Artifacts"}
