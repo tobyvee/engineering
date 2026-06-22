@@ -1,12 +1,5 @@
-import { createWorker } from "@eng/agents"
-import {
-  type DeliveryAdapter,
-  type LifecycleStage,
-  type PullRequestRef,
-  ROLES,
-  type RoleId,
-  type TicketStatus,
-} from "@eng/core"
+import { proposeFileChanges } from "@eng/agents"
+import { type DeliveryAdapter, type PullRequestRef, ROLES, type TicketStatus } from "@eng/core"
 import { appendAudit, getTicket, getTraceContext, setTicketStatus } from "@eng/db"
 import { createGitHubDelivery } from "@eng/integrations"
 
@@ -17,58 +10,6 @@ import { createGitHubDelivery } from "@eng/integrations"
  */
 export async function transitionTicket(ticketId: string, status: TicketStatus): Promise<void> {
   await setTicketStatus(ticketId, status)
-}
-
-/** Pick the role that primarily owns a lifecycle stage. */
-function roleForStage(stage: LifecycleStage): RoleId {
-  for (const role of Object.values(ROLES)) {
-    if (role.ownsStages.includes(stage)) return role.id
-  }
-  return "staff_engineer"
-}
-
-export async function runAgentStep(ticketId: string, stage: LifecycleStage): Promise<void> {
-  const roleId = roleForStage(stage)
-  const role = ROLES[roleId]
-
-  try {
-    const [ticket, goalContext] = await Promise.all([
-      getTicket(ticketId),
-      getTraceContext(ticketId),
-    ])
-
-    const result = await createWorker().run({
-      role: roleId,
-      systemPrompt: role.systemPrompt,
-      tools: role.tools,
-      goalContext,
-      task: ticket
-        ? `Advance the "${stage}" stage of ticket "${ticket.title}": ${ticket.description || "(no description provided)"}.`
-        : `Advance the "${stage}" stage of ticket ${ticketId}.`,
-      budgetCentsRemaining: role.monthlyBudgetCents,
-    })
-
-    await appendAudit({
-      actor: roleId,
-      kind: "agent_step",
-      ticketId,
-      payload: {
-        stage,
-        summary: result.summary,
-        costCents: result.costCents,
-        stoppedReason: result.stoppedReason,
-      },
-    })
-  } catch (err) {
-    // The durable workflow must still progress even if the agent runtime is unavailable
-    // (e.g. no credentials configured) — record the skip instead of failing the activity.
-    await appendAudit({
-      actor: "system",
-      kind: "agent_step_skipped",
-      ticketId,
-      payload: { stage, role: roleId, error: String(err) },
-    })
-  }
 }
 
 // --- Delivery (GitHub) -------------------------------------------------------
@@ -83,8 +24,47 @@ function deliveryFromEnv(): DeliveryAdapter | null {
 
 const BASE_BRANCH = process.env.GITHUB_BASE_BRANCH ?? "main"
 
-/** Open a branch + PR for the ticket's work. Returns null when GitHub isn't configured. */
-export async function startDelivery(ticketId: string): Promise<PullRequestRef | null> {
+/**
+ * The implementation step: a Staff Engineer agent writes the code, then — if GitHub is configured —
+ * the changes are committed to a ticket branch and a PR is opened. Returns the PR (for the later
+ * merge) or null. A no-op delivery when GitHub isn't set, so the lifecycle still completes.
+ */
+export async function implementTicket(ticketId: string): Promise<PullRequestRef | null> {
+  const role = ROLES.staff_engineer
+  const [ticket, goalContext] = await Promise.all([getTicket(ticketId), getTraceContext(ticketId)])
+  const title = ticket?.title ?? `Ticket ${ticketId}`
+
+  let proposed: Awaited<ReturnType<typeof proposeFileChanges>> | null = null
+  try {
+    proposed = await proposeFileChanges({
+      role: role.id,
+      systemPrompt: role.systemPrompt,
+      goalContext,
+      task: ticket
+        ? `Implement ticket "${ticket.title}": ${ticket.description || "(no description provided)"}.`
+        : `Implement ticket ${ticketId}.`,
+      budgetCentsRemaining: role.monthlyBudgetCents,
+    })
+    await appendAudit({
+      actor: "staff_engineer",
+      kind: "agent_step",
+      ticketId,
+      payload: {
+        stage: "implementation",
+        summary: proposed.summary,
+        costCents: proposed.costCents,
+        files: proposed.files.length,
+      },
+    })
+  } catch (err) {
+    await appendAudit({
+      actor: "system",
+      kind: "agent_step_skipped",
+      ticketId,
+      payload: { stage: "implementation", error: String(err) },
+    })
+  }
+
   const delivery = deliveryFromEnv()
   if (!delivery) {
     await appendAudit({
@@ -95,16 +75,27 @@ export async function startDelivery(ticketId: string): Promise<PullRequestRef | 
     })
     return null
   }
+  if (!proposed || proposed.files.length === 0) {
+    await appendAudit({
+      actor: "system",
+      kind: "delivery_skipped",
+      ticketId,
+      payload: { reason: "no file changes proposed" },
+    })
+    return null
+  }
 
   const branch = `ticket/${ticketId}`
   try {
-    const ticket = await getTicket(ticketId)
     await delivery.createBranch(BASE_BRANCH, branch)
-    const pr = await delivery.openPullRequest({
-      branch,
-      title: ticket?.title ?? `Ticket ${ticketId}`,
-      body: `Automated delivery for ticket ${ticketId}.`,
+    const commit = await delivery.commitFiles(branch, `feat: ${title}`, proposed.files)
+    await appendAudit({
+      actor: "staff_engineer",
+      kind: "code_pushed",
+      ticketId,
+      payload: { branch, sha: commit.sha, files: proposed.files.length },
     })
+    const pr = await delivery.openPullRequest({ branch, title, body: proposed.summary })
     await appendAudit({
       actor: "lead_engineer",
       kind: "pr_opened",
@@ -117,7 +108,7 @@ export async function startDelivery(ticketId: string): Promise<PullRequestRef | 
       actor: "system",
       kind: "delivery_error",
       ticketId,
-      payload: { phase: "open", branch, error: String(err) },
+      payload: { phase: "push", branch, error: String(err) },
     })
     return null
   }

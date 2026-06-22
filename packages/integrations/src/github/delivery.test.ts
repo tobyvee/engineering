@@ -83,4 +83,44 @@ describe("GitHubDeliveryAdapter", () => {
 
     expect(merge).toHaveBeenCalledWith({ owner: "acme", repo: "widgets", pull_number: 7 })
   })
+
+  it("commits files via the Git Data API and moves the branch ref", async () => {
+    const getRef = vi.fn().mockResolvedValue({ data: { object: { sha: "base-commit" } } })
+    const getCommit = vi.fn().mockResolvedValue({ data: { tree: { sha: "base-tree" } } })
+    const createTree = vi.fn().mockResolvedValue({ data: { sha: "new-tree" } })
+    const createCommit = vi.fn().mockResolvedValue({ data: { sha: "new-commit" } })
+    const updateRef = vi.fn().mockResolvedValue({ data: {} })
+
+    const res = await adapterWith({
+      git: { getRef, getCommit, createTree, createCommit, updateRef },
+    }).commitFiles("feature/x", "feat: add a", [
+      { path: "src/a.ts", content: "export const a = 1\n" },
+    ])
+
+    expect(res).toEqual({ sha: "new-commit" })
+    expect(getCommit).toHaveBeenCalledWith({
+      owner: "acme",
+      repo: "widgets",
+      commit_sha: "base-commit",
+    })
+    expect(createTree).toHaveBeenCalledWith({
+      owner: "acme",
+      repo: "widgets",
+      base_tree: "base-tree",
+      tree: [{ path: "src/a.ts", mode: "100644", type: "blob", content: "export const a = 1\n" }],
+    })
+    expect(createCommit).toHaveBeenCalledWith({
+      owner: "acme",
+      repo: "widgets",
+      message: "feat: add a",
+      tree: "new-tree",
+      parents: ["base-commit"],
+    })
+    expect(updateRef).toHaveBeenCalledWith({
+      owner: "acme",
+      repo: "widgets",
+      ref: "heads/feature/x",
+      sha: "new-commit",
+    })
+  })
 })

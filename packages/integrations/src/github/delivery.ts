@@ -2,6 +2,7 @@ import type {
   CheckState,
   CheckStatus,
   DeliveryAdapter,
+  FileChange,
   OpenPullRequestArgs,
   PullRequestRef,
 } from "@eng/core"
@@ -29,6 +30,44 @@ export class GitHubDeliveryAdapter implements DeliveryAdapter {
       ref: `refs/heads/${name}`,
       sha: ref.object.sha,
     })
+  }
+
+  async commitFiles(
+    branch: string,
+    message: string,
+    files: FileChange[],
+  ): Promise<{ sha: string }> {
+    const { data: ref } = await this.octokit.rest.git.getRef({
+      ...this.repo,
+      ref: `heads/${branch}`,
+    })
+    const baseCommitSha = ref.object.sha
+    const { data: baseCommit } = await this.octokit.rest.git.getCommit({
+      ...this.repo,
+      commit_sha: baseCommitSha,
+    })
+    const { data: tree } = await this.octokit.rest.git.createTree({
+      ...this.repo,
+      base_tree: baseCommit.tree.sha,
+      tree: files.map((f) => ({
+        path: f.path,
+        mode: "100644" as const,
+        type: "blob" as const,
+        content: f.content,
+      })),
+    })
+    const { data: commit } = await this.octokit.rest.git.createCommit({
+      ...this.repo,
+      message,
+      tree: tree.sha,
+      parents: [baseCommitSha],
+    })
+    await this.octokit.rest.git.updateRef({
+      ...this.repo,
+      ref: `heads/${branch}`,
+      sha: commit.sha,
+    })
+    return { sha: commit.sha }
   }
 
   async openPullRequest(args: OpenPullRequestArgs): Promise<PullRequestRef> {

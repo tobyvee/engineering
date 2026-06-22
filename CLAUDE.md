@@ -6,12 +6,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 > `typecheck`/`lint`/`test`. A real end-to-end slice works against Postgres + Temporal: create a
 > ticket → a durable workflow advances it `planned → in_progress → in_review`, blocks at a human
 > approval gate (a Temporal Signal), then completes on approval — every transition persisted and
-> appended to the audit log, with the Mission→Goal→Epic chain seeded for traceability. The Claude
-> worker is implemented — `runAgentStep` runs `ClaudeWorker` (Anthropic API or `claude -p` CLI
-> backends) within budget and records the result. The GitHub `DeliveryAdapter` is wired into the
-> durable workflow: after the agent step the lifecycle opens a branch + PR, polls CI (bounded), and
-> merges on approval — a no-op when GitHub isn't configured. The remaining gap is the coding agent
-> actually pushing commits to the PR branch (and deploy).
+> appended to the audit log, with the Mission→Goal→Epic chain seeded for traceability. The
+> implementation step (`implementTicket`) runs a coding agent (`ClaudeWorker` — Anthropic API or
+> `claude -p` CLI) that proposes file changes; these are committed to a ticket branch via the GitHub
+> Git Data API and opened as a PR, then CI is polled and the PR merged on approval — all a no-op when
+> GitHub isn't configured. Remaining: an actual deploy step.
 > Sections marked _(target)_ describe intended behavior not yet wired; the "Decisions" section tracks
 > what is settled vs. still open.
 
@@ -130,7 +129,8 @@ git host, CI, and issue tracker; the **first implementation targets GitHub** (PR
 GitHub Issues/Projects as the likely initial tracker). Plan/assign/track/report works without it. The
 `ticket → branch/PR → CI → review → merge` path is **now wired in the Temporal `ticketLifecycle`
 workflow** behind the adapter (the activities build it from `GITHUB_*` env and no-op when unset);
-the coding-agent push and deploy remain to be added, without reworking `core`.
+the coding agent now writes file changes that are committed to the branch (Git Data API) before the
+PR opens; an actual deploy step remains — all without reworking `core`.
 
 ## Key invariants (the "big picture" that spans files)
 
