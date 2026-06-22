@@ -2,22 +2,33 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-> **Status: skeleton + first vertical slice.** The pnpm + Turborepo monorepo passes
-> `typecheck`/`lint`/`test`. A real end-to-end slice works against Postgres + Temporal: create a
-> ticket → a durable workflow advances it `planned → in_progress → in_review`, blocks at a human
-> approval gate (a Temporal Signal), then completes on approval — every transition persisted and
-> appended to the audit log, with the Mission→Goal→Epic chain seeded for traceability. The
-> implementation step (`implementTicket`) runs a coding agent (`ClaudeWorker` — Anthropic API or
-> `claude -p` CLI) that proposes file changes; these are committed to a ticket branch via the GitHub
-> Git Data API and opened as a PR, then CI is polled and the PR merged on approval. After merge a
-> second human gate (ship) dispatches a GitHub Actions deploy (`workflow_dispatch`) and polls the run
-> to completion. Delivery + deploy are a no-op when unconfigured; both gates are human approvals. The
-> full lifecycle is implemented — a true end-to-end run just needs an `ANTHROPIC_API_KEY` + a GitHub
-> repo/token/deploy workflow. A QA agent gates acceptance criteria (blocks on fail), per-role budgets
-> are enforced from the DB (limit−spent), and a Temporal Schedule auto-starts backlog tickets. It's
-> hardened with run-id deploy correlation, activity retries, and block-on-failure.
-> Sections marked _(target)_ describe intended behavior not yet wired; the "Decisions" section tracks
-> what is settled vs. still open.
+> **Status: the full product-development lifecycle is implemented — one real `ANTHROPIC_API_KEY` away
+> from a live autonomous run.** The pnpm + Turborepo monorepo passes `typecheck`/`lint`/`test` (47) +
+> `build`. The whole lifecycle runs as durable Temporal workflows against Postgres, with **all seven
+> roles driving a stage** behind **three human approval gates** (roadmap · merge · deploy):
+>
+> - **Shape** (`epicShaping`): PM discovery → UX design → Lead Architect ADR → Lead System Design
+>   each draft an artifact for an epic (`draft`), handed stage-to-stage and persisted to the KB.
+> - **[roadmap sign-off gate]** → **Decompose** (`epicDecomposition`): the Lead Engineer agent
+>   (`proposeTickets`) breaks the epic — informed by the shaping artifacts — into backlog tickets,
+>   but *blocks until the human approves the plan* (invariant #4).
+> - **Per ticket** (`ticketLifecycle`): a Staff Engineer agent writes code (`proposeFileChanges`) →
+>   branch + commit (GitHub Git Data API) → PR → CI poll → a QA agent gates acceptance criteria
+>   (blocks on fail) → **[merge gate]** → merge → **[deploy gate]** → GitHub Actions
+>   `workflow_dispatch` deploy → poll run → `done`.
+>
+> Every transition is persisted and appended to the append-only audit log (the dashboard is a read
+> view over it); the Mission→Goal→Epic chain gives traceability; per-role budgets are enforced
+> centrally from the DB (limit−spent); a Temporal Schedule auto-starts backlog tickets. Persistence is
+> pluggable behind `core` ports (`IssueTracker` · `KnowledgeBase` · `Hierarchy` · `AuditLog`) selected
+> by `PERSISTENCE_BACKEND` = `postgres` | `github` (GitHub = Issues + repo-docs KB + the
+> Mission→Goal→Epic hierarchy as native sub-issues). A React dashboard surfaces the Board, Roadmap
+> (goal/epic authoring + Shape/Decompose/Artifacts), Approvals (pending gates), and Audit. Delivery +
+> deploy no-op when GitHub isn't configured, and the agent steps no-op (audited `*_skipped`) without
+> credentials — so a true autonomous run just needs an `ANTHROPIC_API_KEY` (+ a GitHub
+> repo/token/deploy workflow for real delivery). Hardened with run-id
+> deploy correlation, activity retries, and block-on-failure. `docs/OVERVIEW.md` is the detailed
+> inventory; the "Decisions" section below tracks what is settled vs. still open.
 
 ## What we're building
 
