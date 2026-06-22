@@ -32,6 +32,11 @@ export const api = {
     postJson<{ epic: HierarchyNode }>("/api/epics", { title, goalId }),
   createTicket: (title: string, epicId?: string) =>
     postJson<{ ticket: Ticket }>("/api/tickets", { title, epicId }),
+  shapeEpic: (id: string) => postJson<{ shaping: boolean }>(`/api/epics/${id}/shape`),
+  artifacts: (id: string) =>
+    getJson<{ artifacts: { stage: string; title: string; content: string }[] }>(
+      `/api/epics/${id}/artifacts`,
+    ).then((r) => r.artifacts),
   decomposeEpic: (id: string) => postJson<{ decomposing: boolean }>(`/api/epics/${id}/decompose`),
   startTicket: (id: string) => postJson<{ started: boolean }>(`/api/tickets/${id}/start`),
   approve: (id: string, gate: "merge" | "deploy") =>

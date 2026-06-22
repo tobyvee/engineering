@@ -178,6 +178,20 @@ li {
   gap: 8px;
 }
 
+.artifact {
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin: 4px 0 8px;
+  padding: 8px 10px;
+  background: #0e1014;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--fg);
+  font-size: 12px;
+  max-height: 240px;
+  overflow: auto;
+}
+
 .muted {
   color: var(--muted);
   font-size: 14px;

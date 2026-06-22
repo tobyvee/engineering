@@ -1,6 +1,12 @@
 import { Hono } from "hono"
 import { persistenceFromEnv } from "./persistence"
-import { approveTicket, startEpicDecomposition, startTicketLifecycle } from "./temporal/client"
+import { artifactPath, SHAPING_STAGES } from "./shaping"
+import {
+  approveTicket,
+  startEpicDecomposition,
+  startEpicShaping,
+  startTicketLifecycle,
+} from "./temporal/client"
 
 /**
  * The HTTP API. GET routes are read views over append-only state. Mutations that affect agent work
@@ -46,6 +52,24 @@ app.post("/api/epics", async (c) => {
     goalId: body.goalId,
   })
   return c.json({ epic }, 201)
+})
+
+// Upstream shaping: PM discovery → UX design → architecture agents draft artifacts for the epic.
+app.post("/api/epics/:id/shape", async (c) => {
+  const id = c.req.param("id")
+  await startEpicShaping(id)
+  return c.json({ epicId: id, shaping: true })
+})
+
+// The shaping artifacts drafted for an epic (a read view over the KB).
+app.get("/api/epics/:id/artifacts", async (c) => {
+  const id = c.req.param("id")
+  const artifacts = []
+  for (const stage of SHAPING_STAGES) {
+    const content = await persistence.knowledge.read(artifactPath(id, stage.key))
+    if (content) artifacts.push({ stage: stage.key, title: stage.title, content })
+  }
+  return c.json({ artifacts })
 })
 
 // Agent-driven decomposition: the Lead Engineer breaks the epic into backlog tickets. Durable +

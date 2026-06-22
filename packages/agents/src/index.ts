@@ -11,6 +11,7 @@ export {
   parseTickets,
   proposeTickets,
 } from "./decompose"
+export { type DraftedArtifact, type DraftInput, draft } from "./draft"
 export { DEFAULT_MODEL } from "./prompt"
 export {
   type ProposeChangesInput,

@@ -34,6 +34,21 @@ export async function startTicketLifecycle(ticketId: string): Promise<void> {
   }
 }
 
+/** Start upstream shaping (PM → UX → architecture) for an epic (idempotent while one is running). */
+export async function startEpicShaping(epicId: string): Promise<void> {
+  const client = await getTemporalClient()
+  try {
+    await client.workflow.start("epicShaping", {
+      taskQueue: TASK_QUEUE,
+      workflowId: `epic-shape-${epicId}`,
+      args: [epicId],
+    })
+  } catch (err) {
+    if ((err as { name?: string })?.name === "WorkflowExecutionAlreadyStartedError") return
+    throw err
+  }
+}
+
 /** Start agent-driven decomposition for an epic (idempotent while one is already running). */
 export async function startEpicDecomposition(epicId: string): Promise<void> {
   const client = await getTemporalClient()

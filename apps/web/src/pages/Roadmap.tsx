@@ -3,6 +3,72 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
 import { api } from "../api"
 
+/** One epic: the upstream shaping (PM→UX→Architect) + decomposition agent triggers, and its
+ *  drafted artifacts on demand. */
+function EpicRow({ epic }: { epic: HierarchyNode }) {
+  const qc = useQueryClient()
+  const [open, setOpen] = useState(false)
+  const { data: artifacts } = useQuery({
+    queryKey: ["artifacts", epic.id],
+    queryFn: () => api.artifacts(epic.id),
+    enabled: open,
+  })
+  const shape = useMutation({
+    mutationFn: () => api.shapeEpic(epic.id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["artifacts", epic.id] }),
+  })
+  const decompose = useMutation({
+    mutationFn: () => api.decomposeEpic(epic.id),
+    // New tickets land in backlog — refresh the Board's view.
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["tickets"] }),
+  })
+
+  const docs = artifacts ?? []
+  return (
+    <li>
+      <div className="sub-row">
+        <span>{epic.title}</span>
+        <div className="actions">
+          <button
+            className="btn"
+            type="button"
+            onClick={() => shape.mutate()}
+            disabled={shape.isPending}
+            title="PM → UX → Architect agents draft requirements, design, and an ADR"
+          >
+            Shape
+          </button>
+          <button
+            className="btn"
+            type="button"
+            onClick={() => decompose.mutate()}
+            disabled={decompose.isPending}
+            title="Lead Engineer agent breaks this epic into tickets"
+          >
+            Decompose
+          </button>
+          <button className="btn" type="button" onClick={() => setOpen((o) => !o)}>
+            {open ? "Hide" : "Artifacts"}
+          </button>
+        </div>
+      </div>
+      {open &&
+        (docs.length === 0 ? (
+          <p className="muted">No artifacts yet — run Shape.</p>
+        ) : (
+          <ul className="sub">
+            {docs.map((a) => (
+              <li key={a.stage}>
+                <strong>{a.title}</strong>
+                <pre className="artifact">{a.content}</pre>
+              </li>
+            ))}
+          </ul>
+        ))}
+    </li>
+  )
+}
+
 /** One goal with its epics + an inline form to author another epic under it. */
 function GoalCard({ goal }: { goal: HierarchyNode }) {
   const qc = useQueryClient()
@@ -16,11 +82,6 @@ function GoalCard({ goal }: { goal: HierarchyNode }) {
       qc.invalidateQueries({ queryKey: ["epics"] })
     },
   })
-  const decompose = useMutation({
-    mutationFn: (epicId: string) => api.decomposeEpic(epicId),
-    // New tickets land in backlog — refresh the Board's view.
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["tickets"] }),
-  })
 
   const epics = data ?? []
   return (
@@ -32,18 +93,7 @@ function GoalCard({ goal }: { goal: HierarchyNode }) {
       {epics.length > 0 && (
         <ul className="sub">
           {epics.map((e) => (
-            <li key={e.id} className="sub-row">
-              <span>{e.title}</span>
-              <button
-                className="btn"
-                type="button"
-                onClick={() => decompose.mutate(e.id)}
-                disabled={decompose.isPending}
-                title="Lead Engineer agent breaks this epic into tickets"
-              >
-                Decompose
-              </button>
-            </li>
+            <EpicRow key={e.id} epic={e} />
           ))}
         </ul>
       )}

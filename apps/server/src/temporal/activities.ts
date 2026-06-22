@@ -1,4 +1,4 @@
-import { assess, proposeFileChanges, proposeTickets } from "@eng/agents"
+import { assess, draft, proposeFileChanges, proposeTickets } from "@eng/agents"
 import {
   type DeliveryAdapter,
   type DeployState,
@@ -9,6 +9,7 @@ import {
 import { addSpend, getBudgetRemaining } from "@eng/db"
 import { createGitHubDelivery } from "@eng/integrations"
 import { persistenceFromEnv } from "../persistence"
+import { artifactPath, SHAPING_STAGES } from "../shaping"
 import { startTicketLifecycle } from "./client"
 
 /**
@@ -29,15 +30,80 @@ export async function transitionTicket(ticketId: string, status: TicketStatus): 
   })
 }
 
+/** The artifacts (requirements/design/ADR) drafted for an epic by the upstream shaping stages. */
+async function epicArtifacts(epicId: string): Promise<string[]> {
+  const docs: string[] = []
+  for (const s of SHAPING_STAGES) {
+    const doc = await persistence.knowledge.read(artifactPath(epicId, s.key))
+    if (doc) docs.push(doc)
+  }
+  return docs
+}
+
+/**
+ * One upstream shaping stage: a role agent (PM / UX / Architect) drafts an artifact for the epic,
+ * informed by the epic's why plus the artifacts from earlier stages (accumulating handoff). The
+ * artifact is persisted to the KB and audited. Budget-enforced (invariant #3); a runtime error
+ * records `artifact_skipped` and the pipeline continues.
+ */
+export async function runShapingStage(epicId: string, stageKey: string): Promise<void> {
+  const stage = SHAPING_STAGES.find((s) => s.key === stageKey)
+  if (!stage) return
+  const role = ROLES[stage.role]
+  const remaining = (await getBudgetRemaining(role.id)) ?? role.monthlyBudgetCents
+
+  const epicCtx = await persistence.hierarchy.epicContext(epicId)
+  const prior: string[] = []
+  for (const s of SHAPING_STAGES) {
+    if (s.key === stageKey) break
+    const doc = await persistence.knowledge.read(artifactPath(epicId, s.key))
+    if (doc) prior.push(doc)
+  }
+  const goalContext = [epicCtx, ...prior].join("\n\n")
+
+  try {
+    const result = await draft({
+      role: role.id,
+      systemPrompt: role.systemPrompt,
+      goalContext,
+      task: stage.task,
+      budgetCentsRemaining: remaining,
+    })
+    await addSpend(role.id, result.costCents)
+    await persistence.knowledge.write(
+      artifactPath(epicId, stageKey),
+      `# ${stage.title}\n\n${result.content}\n`,
+    )
+    await persistence.audit.append({
+      actor: role.id,
+      kind: "artifact_drafted",
+      ticketId: null,
+      payload: { epicId, stage: stageKey, costCents: result.costCents },
+    })
+  } catch (err) {
+    await persistence.audit.append({
+      actor: "system",
+      kind: "artifact_skipped",
+      ticketId: null,
+      payload: { epicId, stage: stageKey, error: String(err) },
+    })
+  }
+}
+
 /**
  * Agent-driven decomposition: the Lead Engineer agent breaks an epic into implementable tickets,
- * each created in `backlog` under the epic (traceable, invariant #1) and audited. Budget is enforced
- * centrally (invariant #3). When the agent runtime is unavailable (e.g. no credentials), it records
- * `decomposition_skipped` and creates nothing — the no-op mirrors the implementation step.
+ * each created in `backlog` under the epic (traceable, invariant #1) and audited. The epic's why
+ * plus any upstream artifacts (discovery/design/architecture) inform the breakdown. Budget is
+ * enforced centrally (invariant #3). When the agent runtime is unavailable (e.g. no credentials), it
+ * records `decomposition_skipped` and creates nothing — the no-op mirrors the implementation step.
  */
 export async function decomposeEpic(epicId: string): Promise<string[]> {
   const role = ROLES.lead_engineer
-  const goalContext = await persistence.hierarchy.epicContext(epicId)
+  const [epicCtx, artifacts] = await Promise.all([
+    persistence.hierarchy.epicContext(epicId),
+    epicArtifacts(epicId),
+  ])
+  const goalContext = [epicCtx, ...artifacts].join("\n\n")
   const remaining = (await getBudgetRemaining(role.id)) ?? role.monthlyBudgetCents
 
   let proposed: Awaited<ReturnType<typeof proposeTickets>>

@@ -12,6 +12,7 @@ const {
   recordDeploy,
   pickUpBacklog,
   decomposeEpic,
+  runShapingStage,
 } = proxyActivities<typeof activities>({
   startToCloseTimeout: "10 minutes",
   retry: { maximumAttempts: 3 },
@@ -20,6 +21,17 @@ const {
 /** Heartbeat: fired on a schedule; starts the lifecycle for any backlog tickets. */
 export async function heartbeat(): Promise<void> {
   await pickUpBacklog()
+}
+
+/**
+ * Upstream shaping as a durable pipeline: PM discovery → UX design → architecture. Each stage's
+ * agent drafts an artifact (retried on failure) that the next stage — and the Lead Engineer's
+ * decomposition — builds on. Sequential so the handoff accumulates.
+ */
+export async function epicShaping(epicId: string): Promise<void> {
+  for (const stage of ["discovery", "design", "architecture"]) {
+    await runShapingStage(epicId, stage)
+  }
 }
 
 /**
