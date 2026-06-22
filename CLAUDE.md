@@ -8,9 +8,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 > approval gate (a Temporal Signal), then completes on approval — every transition persisted and
 > appended to the audit log, with the Mission→Goal→Epic chain seeded for traceability. The Claude
 > worker is implemented — `runAgentStep` runs `ClaudeWorker` (Anthropic API or `claude -p` CLI
-> backends) within budget and records the result. The GitHub `DeliveryAdapter` is implemented
-> (branches, PRs, checks, merge via octokit); wiring it into the durable workflow — the
-> `ticket → branch → PR → CI → merge` loop — is the remaining step.
+> backends) within budget and records the result. The GitHub `DeliveryAdapter` is wired into the
+> durable workflow: after the agent step the lifecycle opens a branch + PR, polls CI (bounded), and
+> merges on approval — a no-op when GitHub isn't configured. The remaining gap is the coding agent
+> actually pushing commits to the PR branch (and deploy).
 > Sections marked _(target)_ describe intended behavior not yet wired; the "Decisions" section tracks
 > what is settled vs. still open.
 
@@ -126,9 +127,10 @@ Ticket lifecycle: `backlog → planned → in_progress → in_review → done | 
 
 Build the full loop's *interface* now, ship *coordination* first. A `DeliveryAdapter` abstracts the
 git host, CI, and issue tracker; the **first implementation targets GitHub** (PRs, checks/Actions, and
-GitHub Issues/Projects as the likely initial tracker). Plan/assign/track/report works without it; the
-`ticket → coding-agent → branch/PR → CI → review → merge → deploy` path plugs in behind the adapter
-later without reworking `core`.
+GitHub Issues/Projects as the likely initial tracker). Plan/assign/track/report works without it. The
+`ticket → branch/PR → CI → review → merge` path is **now wired in the Temporal `ticketLifecycle`
+workflow** behind the adapter (the activities build it from `GITHUB_*` env and no-op when unset);
+the coding-agent push and deploy remain to be added, without reworking `core`.
 
 ## Key invariants (the "big picture" that spans files)
 

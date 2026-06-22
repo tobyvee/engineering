@@ -1,18 +1,26 @@
 import { condition, defineSignal, proxyActivities, setHandler, sleep } from "@temporalio/workflow"
 import type * as activities from "./activities"
 
-const { transitionTicket, runAgentStep } = proxyActivities<typeof activities>({
-  startToCloseTimeout: "10 minutes",
-})
+const { transitionTicket, runAgentStep, startDelivery, checkDeliveryStatus, mergeDelivery } =
+  proxyActivities<typeof activities>({
+    startToCloseTimeout: "10 minutes",
+  })
 
 /** Human approval gate — the dashboard signals this to release the durable wait. */
 export const approveSignal = defineSignal<[boolean]>("approve")
 
+const CI_POLL_INTERVAL = "30 seconds"
+const CI_MAX_POLLS = 20
+
 /**
- * The ticket lifecycle as a durable state machine. Stages are states with human gates: the workflow
- * blocks on `condition(() => approved)` — potentially for days — and survives process restarts.
- * The short sleeps make the intermediate transitions observable on the Board; real routing is
- * agent-driven and can loop (review bounces back, blockers re-queue).
+ * The ticket lifecycle as a durable state machine, with the delivery loop wired in:
+ *
+ *   planned → in_progress → [agent works] → open branch + PR → in_review
+ *           → poll CI (bounded) → [human approval gate] → merge → done
+ *
+ * All GitHub/DB I/O happens in activities; the workflow only orchestrates with deterministic timers
+ * (`sleep`) and the approval `condition`. Delivery is a no-op when GitHub isn't configured, so the
+ * lifecycle still completes. The approval gate blocks — potentially for days — surviving restarts.
  */
 export async function ticketLifecycle(ticketId: string): Promise<void> {
   let approved = false
@@ -24,11 +32,25 @@ export async function ticketLifecycle(ticketId: string): Promise<void> {
   await sleep("2 seconds")
   await transitionTicket(ticketId, "in_progress")
   await runAgentStep(ticketId, "implementation")
-  await sleep("2 seconds")
+
+  // Open a branch + PR for the work (null when GitHub isn't configured).
+  const pr = await startDelivery(ticketId)
   await transitionTicket(ticketId, "in_review")
 
-  // Approval gate (invariant #4): block until the human lead signs off.
+  // Wait for CI to settle, bounded. Skipped when there's no PR.
+  if (pr) {
+    let status = await checkDeliveryStatus(pr)
+    for (let i = 0; status === "pending" && i < CI_MAX_POLLS; i++) {
+      await sleep(CI_POLL_INTERVAL)
+      status = await checkDeliveryStatus(pr)
+    }
+  }
+
+  // Approval gate (invariant #4): block until the human lead signs off on the merge.
   await condition(() => approved)
 
+  if (pr) {
+    await mergeDelivery(ticketId, pr)
+  }
   await transitionTicket(ticketId, "done")
 }
