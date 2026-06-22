@@ -1,5 +1,6 @@
 import type {
   IssueTracker,
+  KnowledgeBase,
   LifecycleStage,
   NewTicket,
   RoleId,
@@ -7,6 +8,7 @@ import type {
   TicketStatus,
 } from "@eng/core"
 import type { Octokit } from "octokit"
+import { ensureSeedEpicId } from "./hierarchy"
 
 /** Our domain fields that GitHub Issues don't model natively are round-tripped in a metadata block. */
 interface TicketMeta {
@@ -90,11 +92,13 @@ export class GitHubIssueTracker implements IssueTracker {
   constructor(
     private readonly octokit: Octokit,
     private readonly repo: { owner: string; repo: string },
+    private readonly knowledge: KnowledgeBase,
   ) {}
 
   async createTicket(input: NewTicket): Promise<Ticket> {
+    const epicId = input.epicId || (await ensureSeedEpicId(this.knowledge))
     const meta: TicketMeta = {
-      epicId: input.epicId,
+      epicId,
       status: input.status,
       stage: input.stage,
       assigneeRole: input.assigneeRole,

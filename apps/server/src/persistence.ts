@@ -1,6 +1,10 @@
 import type { Persistence, PersistenceBackend } from "@eng/core"
-import { DbAuditLog, DbIssueTracker, DbKnowledgeBase } from "@eng/db"
-import { createGitHubIssueTracker, createGitHubKnowledgeBase } from "@eng/integrations"
+import { DbAuditLog, DbHierarchy, DbIssueTracker, DbKnowledgeBase } from "@eng/db"
+import {
+  createGitHubHierarchy,
+  createGitHubIssueTracker,
+  createGitHubKnowledgeBase,
+} from "@eng/integrations"
 
 function githubConfig(): { token: string; owner: string; repo: string } | null {
   const token = process.env.GITHUB_TOKEN
@@ -19,14 +23,17 @@ export function createPersistence(backend: PersistenceBackend): Persistence {
   if (backend === "github") {
     const gh = githubConfig()
     if (gh) {
-      return {
-        tracker: createGitHubIssueTracker(gh),
-        knowledge: createGitHubKnowledgeBase({ ...gh, prefix: process.env.GITHUB_DOCS_PREFIX }),
-        audit,
-      }
+      const knowledge = createGitHubKnowledgeBase({ ...gh, prefix: process.env.GITHUB_DOCS_PREFIX })
+      const tracker = createGitHubIssueTracker(gh, knowledge)
+      return { tracker, knowledge, hierarchy: createGitHubHierarchy(tracker, knowledge), audit }
     }
   }
-  return { tracker: new DbIssueTracker(), knowledge: new DbKnowledgeBase(), audit }
+  return {
+    tracker: new DbIssueTracker(),
+    knowledge: new DbKnowledgeBase(),
+    hierarchy: new DbHierarchy(),
+    audit,
+  }
 }
 
 export function persistenceFromEnv(): Persistence {

@@ -1,6 +1,7 @@
 export * from "./audit"
 export * from "./budget"
 export * from "./delivery"
+export * from "./hierarchy"
 export * from "./knowledge"
 export * from "./persistence"
 export * from "./roles"

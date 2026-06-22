@@ -1,5 +1,7 @@
+import type { IssueTracker, KnowledgeBase } from "@eng/core"
 import { Octokit } from "octokit"
 import { GitHubDeliveryAdapter } from "./delivery"
+import { GitHubHierarchy } from "./hierarchy"
 import { GitHubIssueTracker } from "./issues"
 import { GitHubKnowledgeBase } from "./knowledge"
 
@@ -25,12 +27,25 @@ export function createGitHubDelivery(config: GitHubDeliveryConfig): GitHubDelive
   )
 }
 
-/** Build a GitHubIssueTracker from a token + repo coordinates. */
-export function createGitHubIssueTracker(config: GitHubConfig): GitHubIssueTracker {
-  return new GitHubIssueTracker(new Octokit({ auth: config.token }), {
-    owner: config.owner,
-    repo: config.repo,
-  })
+/** Build a GitHubIssueTracker from a token + repo coordinates. The knowledge base stores the
+ *  mission→goal→epic hierarchy (seeded on first ticket). */
+export function createGitHubIssueTracker(
+  config: GitHubConfig,
+  knowledge: KnowledgeBase,
+): GitHubIssueTracker {
+  return new GitHubIssueTracker(
+    new Octokit({ auth: config.token }),
+    { owner: config.owner, repo: config.repo },
+    knowledge,
+  )
+}
+
+/** Build a GitHubHierarchy from a tracker + knowledge base. */
+export function createGitHubHierarchy(
+  tracker: IssueTracker,
+  knowledge: KnowledgeBase,
+): GitHubHierarchy {
+  return new GitHubHierarchy(tracker, knowledge)
 }
 
 /** Build a GitHubKnowledgeBase (repo docs via the Contents API). */

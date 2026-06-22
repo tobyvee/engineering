@@ -6,7 +6,7 @@ import {
   ROLES,
   type TicketStatus,
 } from "@eng/core"
-import { addSpend, getBudgetRemaining, getTraceContext } from "@eng/db"
+import { addSpend, getBudgetRemaining } from "@eng/db"
 import { createGitHubDelivery } from "@eng/integrations"
 import { persistenceFromEnv } from "../persistence"
 import { startTicketLifecycle } from "./client"
@@ -61,7 +61,7 @@ export async function implementTicket(ticketId: string): Promise<PullRequestRef 
   const role = ROLES.staff_engineer
   const [ticket, goalContext] = await Promise.all([
     persistence.tracker.get(ticketId),
-    getTraceContext(ticketId),
+    persistence.hierarchy.traceContext(ticketId),
   ])
   const title = ticket?.title ?? `Ticket ${ticketId}`
 
@@ -178,7 +178,7 @@ export async function verifyTicket(ticketId: string): Promise<boolean> {
   const remaining = (await getBudgetRemaining(role.id)) ?? role.monthlyBudgetCents
   const [ticket, goalContext] = await Promise.all([
     persistence.tracker.get(ticketId),
-    getTraceContext(ticketId),
+    persistence.hierarchy.traceContext(ticketId),
   ])
   try {
     const verdict = await assess({

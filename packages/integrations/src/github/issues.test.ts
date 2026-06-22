@@ -1,11 +1,16 @@
-import type { NewTicket } from "@eng/core"
+import type { KnowledgeBase, NewTicket } from "@eng/core"
 import type { Octokit } from "octokit"
 import { describe, expect, it, vi } from "vitest"
 import { GitHubIssueTracker } from "./issues"
 
 const repo = { owner: "acme", repo: "widgets" }
+const noopKnowledge: KnowledgeBase = {
+  read: async () => null,
+  write: async () => {},
+  list: async () => [],
+}
 function trackerWith(issues: Record<string, unknown>): GitHubIssueTracker {
-  return new GitHubIssueTracker({ rest: { issues } } as unknown as Octokit, repo)
+  return new GitHubIssueTracker({ rest: { issues } } as unknown as Octokit, repo, noopKnowledge)
 }
 
 const newTicket: NewTicket = {

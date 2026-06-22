@@ -1,4 +1,5 @@
 import type { AuditLog } from "./audit"
+import type { Hierarchy } from "./hierarchy"
 import type { KnowledgeBase } from "./knowledge"
 import type { IssueTracker } from "./tracker"
 
@@ -13,5 +14,6 @@ export type PersistenceBackend = "github" | "postgres"
 export interface Persistence {
   tracker: IssueTracker
   knowledge: KnowledgeBase
+  hierarchy: Hierarchy
   audit: AuditLog
 }

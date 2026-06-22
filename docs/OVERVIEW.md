@@ -39,16 +39,18 @@ The agents' state persists through **ports in `core`** — `IssueTracker`, `Know
 |------|--------------------|------------------|
 | Work items (`IssueTracker`) | `DbIssueTracker` | `GitHubIssueTracker` (issues; fields round-tripped in a metadata block) |
 | Knowledge / docs (`KnowledgeBase`) | `DbKnowledgeBase` (`kb_docs`) | `GitHubKnowledgeBase` (Markdown under `docs/` via the Contents API) |
+| Goal trace (`Hierarchy`) | `DbHierarchy` (mission→goal→epic join) | `GitHubHierarchy` (tree in a versioned `hierarchy.json`; tickets reference an epic) |
 | Audit (`AuditLog`) | `DbAuditLog` | `DbAuditLog` (stays in Postgres — the dashboard read-model) |
 
 > GitHub Wikis have **no REST/GraphQL API** (only a `.wiki.git` repo), so the KB uses repo files —
 > the supported, reviewable equivalent.
 
-The API and workflow are **fully routed through these ports** — ticket create/get/transition/list via
-`persistence.tracker`, all audit via `persistence.audit`, knowledge via `persistence.knowledge` —
-so `PERSISTENCE_BACKEND` governs where agent state lives. (Budgets and the goal-hierarchy trace stay
-in Postgres — control-plane concerns the tracker port doesn't model.) Verified live on Postgres: the
-audit trail is unchanged through the ports.
+The API and workflow are **fully routed through these ports** — tickets via `persistence.tracker`,
+audit via `persistence.audit`, knowledge via `persistence.knowledge`, and the goal-hierarchy trace
+via `persistence.hierarchy` — so `PERSISTENCE_BACKEND` governs where agent state lives. (Budgets stay
+Postgres-direct — a control-plane concern.) On the GitHub backend the mission→goal→epic tree is a
+versioned `hierarchy.json` doc and tickets reference an epic id, so trace works even though Issues
+are flat. Verified live on Postgres; the GitHub adapters are unit-tested.
 
 ## Settled decisions (with rejected alternatives)
 
@@ -112,8 +114,8 @@ human approval gates.
 ## Not yet built (honest gaps)
 
 - Linear / Jira `IssueTracker` backends (GitHub + Postgres exist); a literal GitHub Wiki
-  (`.wiki.git`) KB adapter; modelling the goal hierarchy (mission→goal→epic) on the GitHub backend
-  (it stays in Postgres today, so trace context is degraded when tickets live in GitHub Issues).
+  (`.wiki.git`) KB adapter; native GitHub sub-issues for the hierarchy (today it's a versioned
+  `hierarchy.json` with a single default chain — multi-epic/goal authoring is the next step).
 - Earlier lifecycle stages (discovery/design/architecture by PM/UX/Architect) and work decomposition
   (Lead Engineer breaking epics into tickets) — the slice jumps straight to implementation.
 - No remote / CI for this repo itself.
