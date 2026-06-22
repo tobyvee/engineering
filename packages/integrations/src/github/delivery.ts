@@ -111,20 +111,30 @@ export class GitHubDeliveryAdapter implements DeliveryAdapter {
     })
   }
 
-  async latestDeploymentRun(args: {
+  async latestRunId(args: { workflow: string; ref: string }): Promise<number | null> {
+    const { data } = await this.octokit.rest.actions.listWorkflowRuns({
+      ...this.repo,
+      workflow_id: args.workflow,
+      event: "workflow_dispatch",
+      branch: args.ref,
+      per_page: 1,
+    })
+    return data.workflow_runs[0]?.id ?? null
+  }
+
+  async deploymentRunAfter(args: {
     workflow: string
     ref: string
-    since: string
+    afterRunId: number
   }): Promise<DeploymentRun | null> {
     const { data } = await this.octokit.rest.actions.listWorkflowRuns({
       ...this.repo,
       workflow_id: args.workflow,
       event: "workflow_dispatch",
       branch: args.ref,
-      created: `>=${args.since}`,
-      per_page: 1,
+      per_page: 10,
     })
-    const run = data.workflow_runs[0]
+    const run = data.workflow_runs.find((r) => r.id > args.afterRunId)
     if (!run) return null
     return { id: run.id, url: run.html_url, state: toDeployState(run.status, run.conclusion) }
   }

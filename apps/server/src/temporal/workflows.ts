@@ -11,6 +11,7 @@ const {
   recordDeploy,
 } = proxyActivities<typeof activities>({
   startToCloseTimeout: "10 minutes",
+  retry: { maximumAttempts: 3 },
 })
 
 /**
@@ -61,21 +62,27 @@ export async function ticketLifecycle(ticketId: string): Promise<void> {
 
   // Merge gate: block until the human lead signs off on the merge.
   await condition(() => approved.merge)
-  if (pr) {
-    await mergeDelivery(ticketId, pr)
+  const merged = pr ? await mergeDelivery(ticketId, pr) : true
+  if (!merged) {
+    await transitionTicket(ticketId, "blocked")
+    return
   }
 
   // Ship: human-gated deploy.
   await transitionTicket(ticketId, "deploying")
   await condition(() => approved.deploy)
-  const since = await startDeploy(ticketId)
-  if (since) {
-    let state = await checkDeployStatus(since)
+  const afterRunId = await startDeploy(ticketId)
+  if (afterRunId !== null) {
+    let state = await checkDeployStatus(afterRunId)
     for (let i = 0; state === "pending" && i < DEPLOY_MAX_POLLS; i++) {
       await sleep(DEPLOY_POLL_INTERVAL)
-      state = await checkDeployStatus(since)
+      state = await checkDeployStatus(afterRunId)
     }
     await recordDeploy(ticketId, state)
+    if (state === "failure") {
+      await transitionTicket(ticketId, "blocked")
+      return
+    }
   }
 
   await transitionTicket(ticketId, "done")

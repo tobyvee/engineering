@@ -134,10 +134,10 @@ export async function checkDeliveryStatus(
   return "success"
 }
 
-/** Merge the PR (best-effort — records merge_failed rather than throwing). */
-export async function mergeDelivery(ticketId: string, pr: PullRequestRef): Promise<void> {
+/** Merge the PR. Returns true on success (or nothing to merge), false on failure (audited). */
+export async function mergeDelivery(ticketId: string, pr: PullRequestRef): Promise<boolean> {
   const delivery = deliveryFromEnv()
-  if (!delivery) return
+  if (!delivery) return true
   try {
     await delivery.merge(pr)
     await appendAudit({
@@ -146,6 +146,7 @@ export async function mergeDelivery(ticketId: string, pr: PullRequestRef): Promi
       ticketId,
       payload: { number: pr.number, url: pr.url },
     })
+    return true
   } catch (err) {
     await appendAudit({
       actor: "system",
@@ -153,13 +154,18 @@ export async function mergeDelivery(ticketId: string, pr: PullRequestRef): Promi
       ticketId,
       payload: { number: pr.number, error: String(err) },
     })
+    return false
   }
 }
 
 // --- Deploy (GitHub Actions workflow_dispatch) -------------------------------
 
-/** Trigger a deploy via workflow_dispatch. Returns the dispatch time (for run lookup) or null. */
-export async function startDeploy(ticketId: string): Promise<string | null> {
+/**
+ * Trigger a deploy via workflow_dispatch. Captures the latest run id *before* dispatch and returns
+ * it as the baseline — the new run is the first one with a higher id (robust to clock skew). Returns
+ * null when deploy isn't configured (skipped).
+ */
+export async function startDeploy(ticketId: string): Promise<number | null> {
   const delivery = deliveryFromEnv()
   if (!delivery || !DEPLOY_WORKFLOW) {
     await appendAudit({
@@ -170,8 +176,9 @@ export async function startDeploy(ticketId: string): Promise<string | null> {
     })
     return null
   }
-  const since = new Date().toISOString()
   try {
+    const afterRunId =
+      (await delivery.latestRunId({ workflow: DEPLOY_WORKFLOW, ref: DEPLOY_REF })) ?? 0
     await delivery.dispatchWorkflow({
       workflow: DEPLOY_WORKFLOW,
       ref: DEPLOY_REF,
@@ -181,9 +188,9 @@ export async function startDeploy(ticketId: string): Promise<string | null> {
       actor: "lead_engineer",
       kind: "deploy_dispatched",
       ticketId,
-      payload: { workflow: DEPLOY_WORKFLOW, ref: DEPLOY_REF },
+      payload: { workflow: DEPLOY_WORKFLOW, ref: DEPLOY_REF, afterRunId },
     })
-    return since
+    return afterRunId
   } catch (err) {
     await appendAudit({
       actor: "system",
@@ -195,14 +202,14 @@ export async function startDeploy(ticketId: string): Promise<string | null> {
   }
 }
 
-/** Find the dispatched run's status. `pending` until it appears and completes. */
-export async function checkDeployStatus(since: string): Promise<DeployState> {
+/** Status of the run dispatched after `afterRunId`. `pending` until it appears and completes. */
+export async function checkDeployStatus(afterRunId: number): Promise<DeployState> {
   const delivery = deliveryFromEnv()
   if (!delivery || !DEPLOY_WORKFLOW) return "success"
-  const run = await delivery.latestDeploymentRun({
+  const run = await delivery.deploymentRunAfter({
     workflow: DEPLOY_WORKFLOW,
     ref: DEPLOY_REF,
-    since,
+    afterRunId,
   })
   return run?.state ?? "pending"
 }

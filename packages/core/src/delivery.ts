@@ -52,10 +52,12 @@ export interface DeliveryAdapter {
   merge(pr: PullRequestRef): Promise<void>
   /** Trigger a GitHub Actions deploy via workflow_dispatch (fire-and-forget; returns no run id). */
   dispatchWorkflow(args: DispatchDeployArgs): Promise<void>
-  /** Latest workflow_dispatch run for `workflow` on `ref` created at/after `since` (null if none). */
-  latestDeploymentRun(args: {
+  /** Newest workflow_dispatch run id for `workflow` on `ref` (null if none) — capture before dispatch. */
+  latestRunId(args: { workflow: string; ref: string }): Promise<number | null>
+  /** Newest workflow_dispatch run for `workflow` on `ref` with id greater than `afterRunId`. */
+  deploymentRunAfter(args: {
     workflow: string
     ref: string
-    since: string
+    afterRunId: number
   }): Promise<DeploymentRun | null>
 }

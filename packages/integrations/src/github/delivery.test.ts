@@ -142,13 +142,38 @@ describe("GitHubDeliveryAdapter", () => {
     })
   })
 
-  it("finds the latest deploy run and maps its state", async () => {
+  it("captures the latest run id before dispatch", async () => {
+    const listWorkflowRuns = vi.fn().mockResolvedValue({ data: { workflow_runs: [{ id: 42 }] } })
+
+    const id = await adapterWith({ actions: { listWorkflowRuns } }).latestRunId({
+      workflow: "deploy.yml",
+      ref: "main",
+    })
+
+    expect(id).toBe(42)
+    expect(listWorkflowRuns).toHaveBeenCalledWith({
+      owner: "acme",
+      repo: "widgets",
+      workflow_id: "deploy.yml",
+      event: "workflow_dispatch",
+      branch: "main",
+      per_page: 1,
+    })
+  })
+
+  it("finds the deploy run created after the dispatch and maps its state", async () => {
     const listWorkflowRuns = vi.fn().mockResolvedValue({
       data: {
         workflow_runs: [
           {
-            id: 99,
-            html_url: "https://github.com/acme/widgets/actions/runs/99",
+            id: 100,
+            html_url: "https://github.com/acme/widgets/actions/runs/100",
+            status: "completed",
+            conclusion: "success",
+          },
+          {
+            id: 42,
+            html_url: "https://github.com/acme/widgets/actions/runs/42",
             status: "completed",
             conclusion: "success",
           },
@@ -156,35 +181,30 @@ describe("GitHubDeliveryAdapter", () => {
       },
     })
 
-    const run = await adapterWith({ actions: { listWorkflowRuns } }).latestDeploymentRun({
+    const run = await adapterWith({ actions: { listWorkflowRuns } }).deploymentRunAfter({
       workflow: "deploy.yml",
       ref: "main",
-      since: "2026-06-22T00:00:00Z",
+      afterRunId: 42,
     })
 
     expect(run).toEqual({
-      id: 99,
-      url: "https://github.com/acme/widgets/actions/runs/99",
+      id: 100,
+      url: "https://github.com/acme/widgets/actions/runs/100",
       state: "success",
-    })
-    expect(listWorkflowRuns).toHaveBeenCalledWith({
-      owner: "acme",
-      repo: "widgets",
-      workflow_id: "deploy.yml",
-      event: "workflow_dispatch",
-      branch: "main",
-      created: ">=2026-06-22T00:00:00Z",
-      per_page: 1,
     })
   })
 
-  it("returns null when no deploy run exists yet", async () => {
-    const listWorkflowRuns = vi.fn().mockResolvedValue({ data: { workflow_runs: [] } })
+  it("returns null when no run newer than the dispatch baseline exists yet", async () => {
+    const listWorkflowRuns = vi.fn().mockResolvedValue({
+      data: {
+        workflow_runs: [{ id: 42, html_url: "x", status: "completed", conclusion: "success" }],
+      },
+    })
 
-    const run = await adapterWith({ actions: { listWorkflowRuns } }).latestDeploymentRun({
+    const run = await adapterWith({ actions: { listWorkflowRuns } }).deploymentRunAfter({
       workflow: "deploy.yml",
       ref: "main",
-      since: "x",
+      afterRunId: 42,
     })
 
     expect(run).toBeNull()
