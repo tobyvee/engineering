@@ -1,4 +1,5 @@
 import { condition, defineSignal, proxyActivities, setHandler, sleep } from "@temporalio/workflow"
+import { SHAPING_STAGES } from "../shaping"
 import type * as activities from "./activities"
 
 const {
@@ -29,8 +30,8 @@ export async function heartbeat(): Promise<void> {
  * decomposition — builds on. Sequential so the handoff accumulates.
  */
 export async function epicShaping(epicId: string): Promise<void> {
-  for (const stage of ["discovery", "design", "architecture"]) {
-    await runShapingStage(epicId, stage)
+  for (const stage of SHAPING_STAGES) {
+    await runShapingStage(epicId, stage.key)
   }
 }
 

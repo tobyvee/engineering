@@ -32,6 +32,12 @@ export const SHAPING_STAGES: ShapingStage[] = [
     title: "Architecture decision (ADR)",
     task: "Record the architecture decision for this epic as a short ADR: the approach, key interfaces, alternatives considered, and trade-offs.",
   },
+  {
+    key: "system_design",
+    role: "lead_system_design",
+    title: "System design",
+    task: "Within the chosen architecture, produce a concrete system design for this epic: service/API surface, interface contracts, data shapes, and the key boundaries. Make it specific enough to decompose into tickets.",
+  },
 ]
 
 export function artifactPath(epicId: string, stageKey: string): string {
