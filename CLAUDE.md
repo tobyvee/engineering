@@ -8,7 +8,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 > approval gate (a Temporal Signal), then completes on approval — every transition persisted and
 > appended to the audit log, with the Mission→Goal→Epic chain seeded for traceability. The Claude
 > worker is implemented — `runAgentStep` runs `ClaudeWorker` (Anthropic API or `claude -p` CLI
-> backends) within budget and records the result. Still stubbed: the GitHub delivery loop.
+> backends) within budget and records the result. The GitHub `DeliveryAdapter` is implemented
+> (branches, PRs, checks, merge via octokit); wiring it into the durable workflow — the
+> `ticket → branch → PR → CI → merge` loop — is the remaining step.
 > Sections marked _(target)_ describe intended behavior not yet wired; the "Decisions" section tracks
 > what is settled vs. still open.
 
