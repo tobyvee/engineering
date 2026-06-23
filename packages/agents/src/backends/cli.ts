@@ -1,4 +1,7 @@
 import { spawn } from "node:child_process"
+import { existsSync } from "node:fs"
+import { mkdir, mkdtemp, rm } from "node:fs/promises"
+import { dirname, join, resolve as pathResolve } from "node:path"
 import type { WorkerInput, WorkerResult } from "@eng/core"
 import type { WorkerBackend } from "../claude-worker"
 import { buildSystemPrompt } from "../prompt"
@@ -12,14 +15,53 @@ interface CliResult {
 }
 
 /**
+ * Resolve the sandbox root for cli-backend agents. `claude -p` is the *full* Claude Code agent — it
+ * has filesystem + bash tools — so running it in the repo lets agents mutate source. Every agent
+ * instead runs in a throwaway directory under `<repo>/workspaces/`. Override with
+ * `AGENT_WORKSPACE_DIR`; otherwise the repo root (the dir with `pnpm-workspace.yaml`) is located so
+ * the sandbox is the top-level `workspaces/` regardless of the worker's cwd.
+ */
+export function resolveWorkspaceRoot(): string {
+  const override = process.env.AGENT_WORKSPACE_DIR
+  if (override) return pathResolve(override)
+  let dir = process.cwd()
+  for (let i = 0; i < 8; i++) {
+    if (existsSync(join(dir, "pnpm-workspace.yaml"))) return join(dir, "workspaces")
+    const parent = dirname(dir)
+    if (parent === dir) break
+    dir = parent
+  }
+  return pathResolve(process.cwd(), "workspaces")
+}
+
+/** Create an isolated, unique per-run sandbox directory under the workspace root. */
+export async function createSandbox(root: string, role: string): Promise<string> {
+  await mkdir(root, { recursive: true })
+  return mkdtemp(join(root, `${role}-`))
+}
+
+export interface CliBackendOptions {
+  bin?: string
+  workspaceRoot?: string
+}
+
+/**
  * Worker backend that drives the Claude Code CLI in print mode over stdio: the task is written to
- * the child's stdin, the structured result is read from stdout. Uses the CLI's own auth.
+ * the child's stdin, the structured result is read from stdout. Uses the CLI's own auth. The child
+ * runs with its cwd set to a throwaway sandbox under `workspaces/`, so its tools are confined there
+ * and can never write to repo source (invariant #5 — runtimes don't reach past their boundary).
  */
 export class CliBackend implements WorkerBackend {
+  private readonly bin: string
+  private readonly workspaceRoot: string
+
   constructor(
     private readonly model: string,
-    private readonly bin = process.env.CLAUDE_BIN ?? "claude",
-  ) {}
+    opts: CliBackendOptions = {},
+  ) {
+    this.bin = opts.bin ?? process.env.CLAUDE_BIN ?? "claude"
+    this.workspaceRoot = opts.workspaceRoot ?? resolveWorkspaceRoot()
+  }
 
   async run(input: WorkerInput, signal?: AbortSignal): Promise<WorkerResult> {
     const args = [
@@ -32,7 +74,14 @@ export class CliBackend implements WorkerBackend {
       buildSystemPrompt(input),
     ]
 
-    const stdout = await this.exec(args, input.task, signal)
+    // Confine the agent's file/bash tools to a throwaway sandbox — never the repo source.
+    const sandbox = await createSandbox(this.workspaceRoot, input.role)
+    let stdout: string
+    try {
+      stdout = await this.exec(args, input.task, sandbox, signal)
+    } finally {
+      if (!process.env.AGENT_KEEP_WORKSPACE) await rm(sandbox, { recursive: true, force: true })
+    }
 
     let parsed: CliResult | undefined
     try {
@@ -59,9 +108,9 @@ export class CliBackend implements WorkerBackend {
     }
   }
 
-  private exec(args: string[], stdin: string, signal?: AbortSignal): Promise<string> {
+  private exec(args: string[], stdin: string, cwd: string, signal?: AbortSignal): Promise<string> {
     return new Promise((resolve, reject) => {
-      const child = spawn(this.bin, args, { signal })
+      const child = spawn(this.bin, args, { cwd, signal })
       let stdout = ""
       let stderr = ""
       child.stdout.on("data", (chunk) => {

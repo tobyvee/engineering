@@ -7,3 +7,7 @@ coverage/
 .env.*
 !.env.example
 .DS_Store
+
+# cli-backend agent sandboxes — runtime scratch only (keep the dir + its README)
+/workspaces/*
+!/workspaces/README.md

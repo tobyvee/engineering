@@ -123,6 +123,7 @@ human approval gates (roadmap · merge · deploy). Every stage is a role agent (
 | Budgets | seeded per role; `implementTicket`/`verifyTicket` read remaining (limit−spent) and record spend |
 | QA/Test | QA agent verifies acceptance criteria after implementation; a fail blocks the ticket |
 | Roadmap gate | `epicDecomposition` blocks on a human sign-off before tickets are created; pending gates surface on the Approvals page (derived from the audit log) |
+| CLI agent sandbox | the `cli` backend (`claude -p`) is full Claude Code, so each agent runs cwd-confined in a throwaway `workspaces/<role>-*` dir (cleaned up) — it can't mutate repo source; the `api` backend is tool-less |
 | Decomposition | Lead Engineer agent breaks an epic into backlog tickets (`epicDecomposition` workflow); each ticket then runs its own lifecycle |
 
 ## Not yet built (honest gaps)

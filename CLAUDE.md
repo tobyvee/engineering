@@ -111,6 +111,9 @@ Concretely:
 - **Each agent run is a `Worker` session**: role system prompt + scoped tool set + budget + full
   audit capture. The default `Worker` (`ClaudeWorker`) runs each session via the **Anthropic Messages
   API** (`@anthropic-ai/sdk`) or the **`claude -p` CLI** (stdio), selectable by mode (`WORKER_MODE`).
+  The CLI backend is full Claude Code (filesystem + bash tools), so each agent runs in a throwaway
+  sandbox under `workspaces/` (cwd-confined, cleaned up) and can never write to repo source; the API
+  backend is tool-less. Override the sandbox root with `AGENT_WORKSPACE_DIR`.
 - **The lifecycle is a durable state machine, not a batch DAG.** Stages (`discovery → design →
   architecture → implementation → review → ship`) are *states with human gates*; review can bounce
   work back and blockers loop. The pipeline shape is real, but routing is agent-driven and cyclic.
