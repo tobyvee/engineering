@@ -2,7 +2,7 @@ import Anthropic from "@anthropic-ai/sdk"
 import type { WorkerInput, WorkerResult } from "@eng/core"
 import type { WorkerBackend } from "../claude-worker"
 import { affordableMaxTokens, costCentsFromUsage } from "../pricing"
-import { buildSystemPrompt } from "../prompt"
+import { buildSystemPrompt, supportsAdaptiveThinking } from "../prompt"
 
 /** Worker backend that calls the Anthropic Messages API directly via `@anthropic-ai/sdk`. */
 export class ApiBackend implements WorkerBackend {
@@ -18,7 +18,10 @@ export class ApiBackend implements WorkerBackend {
       {
         model: this.model,
         max_tokens: affordableMaxTokens(this.model, input.budgetCentsRemaining, 16000),
-        thinking: { type: "adaptive" },
+        // Adaptive thinking only where the model supports it — Haiku 4.5 / older 400 on it.
+        ...(supportsAdaptiveThinking(this.model)
+          ? { thinking: { type: "adaptive" as const } }
+          : {}),
         system: buildSystemPrompt(input),
         messages: [{ role: "user", content: input.task }],
         // Structured outputs (ENG-009): constrain the model to schema-conforming JSON when a schema
