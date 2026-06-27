@@ -109,15 +109,20 @@ app.post("/api/epics/:id/approve-roadmap", async (c) => {
 // Create a ticket through the tracker under a chosen epic (or seed the default Mission→Goal→Epic
 // chain when `epicId` is unset, per traceability invariant #1) and record it via the audit port.
 app.post("/api/tickets", async (c) => {
-  const body = (await c.req.json().catch(() => ({}))) as { title?: string; epicId?: string }
+  const body = (await c.req.json().catch(() => ({}))) as {
+    title?: string
+    epicId?: string
+    description?: string
+    acceptanceCriteria?: string[]
+  }
   const ticket = await persistence.tracker.createTicket({
     epicId: body.epicId ?? "",
     title: body.title ?? "Demo ticket",
-    description: "",
+    description: body.description ?? "",
     status: "backlog",
     stage: "implementation",
     assigneeRole: null,
-    acceptanceCriteria: [],
+    acceptanceCriteria: Array.isArray(body.acceptanceCriteria) ? body.acceptanceCriteria : [],
   })
   await persistence.audit.append({
     actor: "system",
