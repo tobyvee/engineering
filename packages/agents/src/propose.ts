@@ -1,5 +1,6 @@
 import type { FileChange, RoleId, StoppedReason } from "@eng/core"
 import { ClaudeWorker } from "./claude-worker"
+import { PROPOSAL_SCHEMA } from "./schemas"
 
 export interface ProposeChangesInput {
   role: RoleId
@@ -15,6 +16,12 @@ export interface ProposedChanges {
   files: FileChange[]
   costCents: number
   stoppedReason: StoppedReason
+  /**
+   * Whether the model returned parseable JSON. `false` means the output couldn't be parsed (prose /
+   * malformed) — distinct from a valid-but-empty change set, so the orchestrator can audit the two
+   * differently (ENG-009).
+   */
+  parsed: boolean
 }
 
 const CONTRACT =
@@ -31,9 +38,29 @@ export async function proposeFileChanges(input: ProposeChangesInput): Promise<Pr
     goalContext: input.goalContext,
     task: `${input.task}\n\n${CONTRACT}`,
     budgetCentsRemaining: input.budgetCentsRemaining,
+    outputSchema: PROPOSAL_SCHEMA,
   })
   const { summary, files } = parseProposal(result.summary)
-  return { summary, files, costCents: result.costCents, stoppedReason: result.stoppedReason }
+  return {
+    summary,
+    files,
+    costCents: result.costCents,
+    stoppedReason: result.stoppedReason,
+    parsed: isParseableJson(result.summary),
+  }
+}
+
+/** True iff the response contains a JSON object that parses — used to tell a parse failure (prose /
+ *  malformed) from a valid-but-empty change set. */
+export function isParseableJson(text: string): boolean {
+  const json = extractJson(text)
+  if (!json) return false
+  try {
+    JSON.parse(json)
+    return true
+  } catch {
+    return false
+  }
 }
 
 export function extractJson(text: string): string | null {

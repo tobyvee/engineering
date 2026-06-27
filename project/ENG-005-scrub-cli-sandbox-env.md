@@ -1,10 +1,17 @@
 # ENG-005 — Scrub the environment for CLI agent sandboxes
 
-- **Status:** backlog
+- **Status:** done
 - **Priority:** P1 (High — security hardening)
 - **Stage:** implementation
 - **Assignee role:** staff_engineer (security review by lead_system_design)
 - **Area:** packages/agents
+
+> **Outcome (Wave 1):** `CliBackend` now spawns `claude -p` with a scrubbed, allow-listed env
+> (`sandboxEnv()` in `backends/cli.ts`) instead of inheriting the host environment — `ANTHROPIC_API_KEY`,
+> `GITHUB_TOKEN`, `DATABASE_URL` and everything else not on the benign allow-list (PATH/HOME/XDG/locale/…)
+> are withheld; the CLI still authenticates via its own login under `HOME`. Opt-in widening via
+> `AGENT_SANDBOX_ENV_PASSTHROUGH`. Unit tests assert secrets are absent and passthrough works.
+> *Deferred to ENG-013:* the PM-agent scoped-token exception.
 
 ## Problem
 

@@ -21,6 +21,15 @@ export class ApiBackend implements WorkerBackend {
         thinking: { type: "adaptive" },
         system: buildSystemPrompt(input),
         messages: [{ role: "user", content: input.task }],
+        // Structured outputs (ENG-009): constrain the model to schema-conforming JSON when a schema
+        // is supplied, so callers parse guaranteed-valid JSON instead of best-effort extraction.
+        ...(input.outputSchema
+          ? {
+              output_config: {
+                format: { type: "json_schema" as const, schema: input.outputSchema },
+              },
+            }
+          : {}),
       },
       { signal },
     )

@@ -276,11 +276,17 @@ export async function implementTicket(ticketId: string): Promise<PullRequestRef 
     return null
   }
   if (!proposed || proposed.files.length === 0) {
+    // Distinguish a genuine empty change set from a parse failure (ENG-009).
+    const reason = !proposed
+      ? "agent runtime unavailable"
+      : proposed.parsed
+        ? "no file changes proposed"
+        : "agent output could not be parsed"
     await persistence.audit.append({
       actor: "system",
       kind: "delivery_skipped",
       ticketId,
-      payload: { reason: "no file changes proposed" },
+      payload: { reason },
     })
     return null
   }

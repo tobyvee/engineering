@@ -1,10 +1,23 @@
 # ENG-004 — API authentication + approval identity
 
-- **Status:** backlog
+- **Status:** done
 - **Priority:** P0 (Critical — do before any live/shared deployment)
 - **Stage:** architecture
 - **Assignee role:** lead_system_design (with lead_architect sign-off)
 - **Area:** apps/server
+
+> **Outcome (Wave 1):** `apps/server/src/auth.ts` adds bearer-token auth — `authMiddleware` on
+> `/api/*` requires `Authorization: Bearer <API_AUTH_TOKEN>` on mutating (non-GET) requests
+> (timing-safe compare; GET read views stay open), resolving the principal from `X-Actor` (default
+> `operator`). The approval endpoints now append an `approval_decided` audit event stamped with the
+> authenticated principal (`payload.by`), so the append-only log records *who* released each gate.
+> When `API_AUTH_TOKEN` is unset the server runs open "dev mode" and warns loudly at startup
+> (`warnIfAuthDisabled`) — set the token to enforce. 9 auth unit tests (pure `checkAuth` + middleware
+> via `app.request`). Typecheck + lint + 73 tests green.
+>
+> *Follow-up (noted):* require-auth-by-default and protecting read views are a hardening decision for
+> the operator; first-class persisted approval records land in ENG-006 (where `decidedBy` moves onto
+> the approval entity).
 
 ## Problem
 

@@ -40,6 +40,52 @@ export async function createSandbox(root: string, role: string): Promise<string>
   return mkdtemp(join(root, `${role}-`))
 }
 
+/**
+ * Env vars forwarded into the agent sandbox (ENG-005). `claude -p` is the full Claude Code agent with
+ * bash + filesystem tools, so the child must NOT inherit the host environment — secrets like
+ * `ANTHROPIC_API_KEY`, `GITHUB_TOKEN`, and `DATABASE_URL` would otherwise be readable from the agent's
+ * shell. Only this benign allow-list is passed; the CLI authenticates via its own login under `HOME`.
+ */
+const SANDBOX_ENV_ALLOWLIST = [
+  "PATH",
+  "HOME",
+  "USER",
+  "LOGNAME",
+  "SHELL",
+  "LANG",
+  "LC_ALL",
+  "LC_CTYPE",
+  "TERM",
+  "TMPDIR",
+  "XDG_CONFIG_HOME",
+  "XDG_CACHE_HOME",
+  "XDG_DATA_HOME",
+] as const
+
+/**
+ * Build the scrubbed environment for a sandboxed agent run: the allow-list above, plus any names
+ * explicitly opted in via `AGENT_SANDBOX_ENV_PASSTHROUGH` (comma-separated). Everything else — notably
+ * credentials — is withheld. Pure and side-effect-free for testability.
+ */
+export function sandboxEnv(source: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {}
+  for (const key of SANDBOX_ENV_ALLOWLIST) {
+    const value = source[key]
+    if (value !== undefined) env[key] = value
+  }
+  const extra = source.AGENT_SANDBOX_ENV_PASSTHROUGH
+  if (extra) {
+    for (const key of extra
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean)) {
+      const value = source[key]
+      if (value !== undefined) env[key] = value
+    }
+  }
+  return env
+}
+
 export interface CliBackendOptions {
   bin?: string
   workspaceRoot?: string
@@ -110,7 +156,8 @@ export class CliBackend implements WorkerBackend {
 
   private exec(args: string[], stdin: string, cwd: string, signal?: AbortSignal): Promise<string> {
     return new Promise((resolve, reject) => {
-      const child = spawn(this.bin, args, { cwd, signal })
+      // Scrubbed env (ENG-005): the agent's tools never see host secrets.
+      const child = spawn(this.bin, args, { cwd, signal, env: sandboxEnv() })
       let stdout = ""
       let stderr = ""
       child.stdout.on("data", (chunk) => {

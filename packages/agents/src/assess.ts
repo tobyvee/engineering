@@ -1,6 +1,7 @@
 import type { RoleId, StoppedReason } from "@eng/core"
 import { ClaudeWorker } from "./claude-worker"
 import { extractJson } from "./propose"
+import { VERDICT_SCHEMA } from "./schemas"
 
 export interface AssessInput {
   role: RoleId
@@ -31,6 +32,7 @@ export async function assess(input: AssessInput): Promise<Assessment> {
     goalContext: input.goalContext,
     task: `${input.task}\n\n${CONTRACT}`,
     budgetCentsRemaining: input.budgetCentsRemaining,
+    outputSchema: VERDICT_SCHEMA,
   })
   const { passed, summary } = parseVerdict(result.summary)
   return { passed, summary, costCents: result.costCents, stoppedReason: result.stoppedReason }

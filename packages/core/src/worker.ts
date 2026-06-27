@@ -16,6 +16,12 @@ export interface WorkerInput {
   task: string
   /** Remaining budget; the orchestrator stops the session if this is exhausted (invariant #3). */
   budgetCentsRemaining: number
+  /**
+   * Optional JSON Schema for the response (ENG-009). Runtimes that support structured outputs (the
+   * API backend) constrain the model to emit schema-conforming JSON; runtimes that don't (the CLI
+   * backend) ignore it and fall back to prompt-contract parsing.
+   */
+  outputSchema?: Record<string, unknown>
 }
 
 export interface ToolCallRecord {

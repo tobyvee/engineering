@@ -1,6 +1,7 @@
 import type { RoleId, StoppedReason } from "@eng/core"
 import { ClaudeWorker } from "./claude-worker"
 import { extractJson } from "./propose"
+import { TICKETS_SCHEMA } from "./schemas"
 
 /** A ticket proposed by the Lead Engineer when decomposing an epic. */
 export interface ProposedTicket {
@@ -51,6 +52,7 @@ export async function proposeTickets(input: ProposeTicketsInput): Promise<Propos
     goalContext: input.goalContext,
     task: `${input.task}\n\n${CONTRACT}`,
     budgetCentsRemaining: input.budgetCentsRemaining,
+    outputSchema: TICKETS_SCHEMA,
   })
   return {
     tickets: parseTickets(result.summary),

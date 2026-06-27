@@ -26,10 +26,12 @@ high-leverage enablers forward even when labelled P1/P2.
   (SurrealDB — no-go on wholesale replacement; one item awaits the lead: relax the OSI-only license
   bar? recommended *no* for now).
 
-### Wave 1 — Safety + enablers (independent, high-leverage)
-- **ENG-004** — API auth + approval identity (P0 security gate before any live/shared run).
-- **ENG-009** — Structured outputs (enabler for ENG-001 quality, ENG-014, ENG-016).
-- **ENG-005** — Scrub the CLI sandbox env (security; prerequisite for the repo-context chain).
+### Wave 1 — Safety + enablers (independent, high-leverage) — ✅ complete (2026-06-27)
+- **ENG-004** ✅ — API auth + approval identity (bearer token on mutating `/api/*`; principal stamped
+  on `approval_decided` audit events; dev-mode warn when unset).
+- **ENG-009** ✅ — Structured outputs (API backend emits `output_config.format`; hand-written schemas;
+  parse-failure vs empty-set audited distinctly).
+- **ENG-005** ✅ — Scrub the CLI sandbox env (allow-listed `sandboxEnv()`; host secrets withheld).
 
 ### Wave 2 — Repo-context critical path
 - **ENG-013** — Repo provisioning (PM `git`/`gh`) + two-root workspace. Needs ENG-005.

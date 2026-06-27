@@ -1,4 +1,5 @@
 import { Hono } from "hono"
+import { type AppEnv, authMiddleware } from "./auth"
 import { persistenceFromEnv } from "./persistence"
 import { artifactPath, SHAPING_STAGES } from "./shaping"
 import {
@@ -16,11 +17,15 @@ import {
  */
 const persistence = persistenceFromEnv()
 
-export const app = new Hono()
+export const app = new Hono<AppEnv>()
 
 app.onError((err, c) => c.json({ error: String(err) }, 500))
 
 app.get("/health", (c) => c.json({ ok: true }))
+
+// Auth gate (ENG-004): GET read views stay open; mutating /api requests require a Bearer token when
+// API_AUTH_TOKEN is set. The resolved principal is recorded on approval events below.
+app.use("/api/*", authMiddleware())
 
 app.get("/api/tickets", async (c) => c.json({ tickets: await persistence.tracker.list() }))
 app.get("/api/audit", async (c) => c.json({ events: await persistence.audit.query() }))
@@ -105,7 +110,15 @@ app.post("/api/epics/:id/decompose", async (c) => {
 app.post("/api/epics/:id/approve-roadmap", async (c) => {
   const id = c.req.param("id")
   const signaled = await approveRoadmap(id)
-  return c.json({ epicId: id, gate: "roadmap", signaled })
+  const by = c.get("actor")
+  // Record who released the gate (ENG-004) — append-only, so the audit log carries the approver.
+  await persistence.audit.append({
+    actor: "human",
+    kind: "approval_decided",
+    ticketId: null,
+    payload: { epicId: id, gate: "roadmap", by, signaled },
+  })
+  return c.json({ epicId: id, gate: "roadmap", signaled, by })
 })
 
 // Create a ticket through the tracker under a chosen epic (or seed the default Mission→Goal→Epic
@@ -144,5 +157,13 @@ app.post("/api/tickets/:id/approve", async (c) => {
   const body = (await c.req.json().catch(() => ({}))) as { gate?: "merge" | "deploy" }
   const gate = body.gate === "deploy" ? "deploy" : "merge"
   await approveTicket(id, gate)
-  return c.json({ ticketId: id, gate, signaled: true })
+  const by = c.get("actor")
+  // Record who released the gate (ENG-004).
+  await persistence.audit.append({
+    actor: "human",
+    kind: "approval_decided",
+    ticketId: id,
+    payload: { gate, by },
+  })
+  return c.json({ ticketId: id, gate, signaled: true, by })
 })

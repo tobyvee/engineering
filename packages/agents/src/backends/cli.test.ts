@@ -3,7 +3,7 @@ import { chmod, mkdir, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
-import { CliBackend, createSandbox, resolveWorkspaceRoot } from "./cli"
+import { CliBackend, createSandbox, resolveWorkspaceRoot, sandboxEnv } from "./cli"
 
 describe("resolveWorkspaceRoot", () => {
   const prev = process.env.AGENT_WORKSPACE_DIR
@@ -39,6 +39,41 @@ describe("createSandbox", () => {
     expect(a).toContain("/pm-")
     expect(existsSync(a)).toBe(true)
     expect(a).not.toBe(b)
+  })
+})
+
+describe("sandboxEnv", () => {
+  it("forwards benign vars but withholds host secrets", () => {
+    const env = sandboxEnv({
+      PATH: "/usr/bin",
+      HOME: "/home/agent",
+      ANTHROPIC_API_KEY: "sk-secret",
+      GITHUB_TOKEN: "ghp-secret",
+      DATABASE_URL: "postgres://secret",
+    })
+    expect(env.PATH).toBe("/usr/bin")
+    expect(env.HOME).toBe("/home/agent")
+    expect(env.ANTHROPIC_API_KEY).toBeUndefined()
+    expect(env.GITHUB_TOKEN).toBeUndefined()
+    expect(env.DATABASE_URL).toBeUndefined()
+  })
+
+  it("supports opt-in passthrough but never leaks unlisted vars", () => {
+    const env = sandboxEnv({
+      PATH: "/usr/bin",
+      AGENT_SANDBOX_ENV_PASSTHROUGH: "FOO, BAR",
+      FOO: "1",
+      BAR: "2",
+      ANTHROPIC_API_KEY: "sk-secret",
+    })
+    expect(env.FOO).toBe("1")
+    expect(env.BAR).toBe("2")
+    expect(env.ANTHROPIC_API_KEY).toBeUndefined()
+  })
+
+  it("omits allow-listed vars that are absent from the source", () => {
+    const env = sandboxEnv({ PATH: "/usr/bin" })
+    expect("HOME" in env).toBe(false)
   })
 })
 
