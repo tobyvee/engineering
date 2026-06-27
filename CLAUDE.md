@@ -2,33 +2,39 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-> **Status: the full product-development lifecycle is implemented — one real `ANTHROPIC_API_KEY` away
-> from a live autonomous run.** The pnpm + Turborepo monorepo passes `typecheck`/`lint`/`test` (47) +
-> `build`. The whole lifecycle runs as durable Temporal workflows against Postgres, with **all seven
-> roles driving a stage** behind **three human approval gates** (roadmap · merge · deploy):
+> **Status: the full product-development lifecycle is implemented and Waves 0–3 of the delivery
+> roadmap (14 of the 16 backlog tickets in `project/`) are complete — Wave 4 (provenance + Kappa
+> consensus) remains; it's one real `ANTHROPIC_API_KEY` away from a live autonomous run.** The pnpm + Turborepo monorepo passes `typecheck`/`lint`/`test` (94) + `build`,
+> enforced by **CI** (`.github/workflows/ci.yml`) on every PR. The whole lifecycle runs as durable
+> Temporal workflows against Postgres, with **all seven roles driving a stage** behind **three human
+> approval gates** (roadmap · merge · deploy):
 >
 > - **Shape** (`epicShaping`): PM discovery → UX design → Lead Architect ADR → Lead System Design
 >   each draft an artifact for an epic (`draft`), handed stage-to-stage and persisted to the KB.
-> - **[roadmap sign-off gate]** → **Decompose** (`epicDecomposition`): the Lead Engineer agent
+> - **[roadmap gate]** → **Decompose** (`epicDecomposition`): the Lead Engineer agent
 >   (`proposeTickets`) breaks the epic — informed by the shaping artifacts — into backlog tickets,
->   but *blocks until the human approves the plan* (invariant #4).
-> - **Per ticket** (`ticketLifecycle`): a Staff Engineer agent writes code (`proposeFileChanges`) →
->   branch + commit (GitHub Git Data API) → PR → CI poll → a QA agent gates acceptance criteria
->   (blocks on fail) → **[merge gate]** → merge → **[deploy gate]** → GitHub Actions
+>   blocking until the human approves the plan (invariant #4).
+> - **Per ticket** (`ticketLifecycle`): a Staff Engineer agent writes code (`proposeFileChanges`)
+>   *against a cloned target repo* → branch + commit (Git Data API) → PR → CI poll → a QA agent gates
+>   acceptance criteria, with a **bounded rework loop** (QA fail → re-implement with the feedback, up
+>   to a cap, then `blocked`) → **[merge gate]** → merge → **[deploy gate]** → Actions
 >   `workflow_dispatch` deploy → poll run → `done`.
 >
-> Every transition is persisted and appended to the append-only audit log (the dashboard is a read
-> view over it); the Mission→Goal→Epic chain gives traceability; per-role budgets are enforced
-> centrally from the DB (limit−spent); a Temporal Schedule auto-starts backlog tickets. Persistence is
-> pluggable behind `core` ports (`IssueTracker` · `KnowledgeBase` · `Hierarchy` · `AuditLog`) selected
-> by `PERSISTENCE_BACKEND` = `postgres` | `github` (GitHub = Issues + repo-docs KB + the
-> Mission→Goal→Epic hierarchy as native sub-issues). A React dashboard surfaces the Board, Roadmap
-> (goal/epic authoring + Shape/Decompose/Artifacts), Approvals (pending gates), and Audit. Delivery +
-> deploy no-op when GitHub isn't configured, and the agent steps no-op (audited `*_skipped`) without
-> credentials — so a true autonomous run just needs an `ANTHROPIC_API_KEY` (+ a GitHub
-> repo/token/deploy workflow for real delivery). Hardened with run-id
-> deploy correlation, activity retries, and block-on-failure. `docs/OVERVIEW.md` is the detailed
-> inventory; the "Decisions" section below tracks what is settled vs. still open.
+> Every transition is appended to the append-only audit log; the Mission→Goal→Epic chain gives
+> traceability; **per-role budgets are monthly-windowed and enforced by an atomic reserve→reconcile
+> hold** (limit−spent, concurrency-safe); a Temporal Schedule auto-starts backlog tickets. **Approval
+> gates are first-class persisted records** (roadmap · merge · deploy), resolved with the deciding
+> principal's identity. Persistence is pluggable behind `core` ports (`IssueTracker` · `KnowledgeBase`
+> · `Hierarchy` · `AuditLog`) selected by `PERSISTENCE_BACKEND` = `postgres` | `github` (GitHub =
+> Issues + repo-docs KB + the hierarchy as native sub-issues). A React dashboard surfaces the Board,
+> Roadmap, Approvals, **Budgets**, and Audit. **The HTTP API is auth-gated** (bearer token; activates
+> when `API_AUTH_TOKEN` is set). Agent runs are sandboxed: the `cli` backend runs in a throwaway,
+> **env-scrubbed** sandbox (only the PM gets a scoped git/gh token) and codes against a separate
+> **working-code workspace** (a cloned target repo, never this repo's source); the `api` backend uses
+> **structured outputs** for reliable JSON. Delivery + deploy no-op when GitHub isn't configured and
+> agent steps no-op (audited `*_skipped`) without credentials — so a true autonomous run just needs an
+> `ANTHROPIC_API_KEY` (+ a GitHub repo/token/deploy workflow for real delivery). `docs/OVERVIEW.md` is
+> the detailed inventory; the "Decisions" section below tracks what is settled vs. open.
 
 ## What we're building
 
@@ -110,10 +116,13 @@ Concretely:
   their queue, act, report, and sleep. Sessions persist across restarts (this is the durability layer).
 - **Each agent run is a `Worker` session**: role system prompt + scoped tool set + budget + full
   audit capture. The default `Worker` (`ClaudeWorker`) runs each session via the **Anthropic Messages
-  API** (`@anthropic-ai/sdk`) or the **`claude -p` CLI** (stdio), selectable by mode (`WORKER_MODE`).
-  The CLI backend is full Claude Code (filesystem + bash tools), so each agent runs in a throwaway
-  sandbox under `workspaces/` (cwd-confined, cleaned up) and can never write to repo source; the API
-  backend is tool-less. Override the sandbox root with `AGENT_WORKSPACE_DIR`.
+  API** (`@anthropic-ai/sdk`, tool-less, with **structured outputs** for JSON steps) or the
+  **`claude -p` CLI** (stdio, full Claude Code), selectable by mode (`WORKER_MODE`). Two sandboxed
+  roots (never conflated): the CLI backend reasons in a throwaway, **env-scrubbed** agent-state sandbox
+  under `workspaces/` (cwd-confined, cleaned up; secrets withheld, only the PM gets a scoped git/gh
+  token), and codes against a **persistent working-code workspace** (`workspace/`, env
+  `AGENT_CODE_WORKSPACE`) holding cloned target repos — so the agent reads/edits real source while this
+  product's own tree is never touched. Override the sandbox root with `AGENT_WORKSPACE_DIR`.
 - **The lifecycle is a durable state machine, not a batch DAG.** Stages (`discovery → design →
   architecture → implementation → review → ship`) are *states with human gates*; review can bounce
   work back and blockers loop. The pipeline shape is real, but routing is agent-driven and cyclic.
@@ -159,9 +168,11 @@ ship step, polling the run to completion — all without reworking `core`.
 2. **The audit log is append-only.** Every agent tool-call and decision is recorded; the dashboard is
    a *read view* over it. Never mutate history.
 3. **Budgets are enforced by the orchestrator**, so a `Worker` cannot exceed its budget even if its
-   own prompt tells it to.
+   own prompt tells it to. Budgets are monthly-windowed (lazy reset) and held via an atomic
+   reserve→reconcile so concurrent runs can't jointly overspend.
 4. **The human is in the loop at configured gates.** Agents *request approval and block* — they do
-   not bypass a gate.
+   not bypass a gate. Each pending gate is a first-class persisted approval record, resolved with the
+   deciding principal's identity. The HTTP API is auth-gated (bearer token when `API_AUTH_TOKEN` is set).
 5. **Cross the boundaries through interfaces only.** `core` never calls the Claude SDK directly — it
    goes through `Worker`; likewise delivery goes through `DeliveryAdapter` and tracking through the
    tracker interface. Swapping a runtime or git host must not touch `core`.
@@ -177,6 +188,7 @@ ship step, polling the run to completion — all without reworking `core`.
 - **Temporal** (self-hosted, MIT) for the durable workflow layer (see Orchestration).
 - **zod** for validation; schemas shared from `core`.
 - **Vitest** for tests; **Biome** for lint + format.
+- **CI:** GitHub Actions (`.github/workflows/ci.yml`) runs typecheck/lint/test/build on every PR to `main`.
 
 ## Commands
 
@@ -224,10 +236,22 @@ docker compose down      # or: pnpm docker:down
   `PERSISTENCE_BACKEND` = `github` | `postgres`. GitHub backend = Issues + repo-docs KB (Contents
   API; Wikis have no API) + the mission→goal→epic hierarchy as native GitHub **sub-issues**;
   audit stays in Postgres. Swapping backends never touches `core` or the workflow.
+- **Issue tracker:** **GitHub Issues/Projects** as the v1 default (Postgres backend for
+  local/standalone); Linear/Jira deferred behind the same `IssueTracker` port (decided in ENG-011).
+- **CI:** GitHub Actions — typecheck/lint/test/build on every PR to `main`.
+- **API auth:** bearer-token middleware on mutating routes (activates when `API_AUTH_TOKEN` is set);
+  the deciding principal is recorded as `decidedBy` on approvals.
+- **Evaluated & declined:** **A2A** (Google agent-to-agent) — monitor, not adopted; internal
+  coordination is already handled by Temporal, so A2A is only relevant at the unit boundary and would
+  live behind a port (ENG-012). **SurrealDB** as the datastore — no-go: it wouldn't remove Postgres
+  (Temporal needs it) and BSL is source-available, not OSI; Postgres + Drizzle stays (ENG-015).
 
 **Working assumptions (confirm or redirect):**
 - _Agent runtime:_ Claude-first — `ClaudeWorker` (Anthropic API + `claude -p` CLI backends) as the default `Worker`, pluggable behind the interface.
 - _Interface:_ API-first core + self-hosted web dashboard; human = accountable lead with approval gates.
 
 **Still open:**
-- _Initial issue tracker:_ GitHub Issues/Projects vs. external (Linear/Jira) behind the same interface.
+- _API auth posture:_ auth is opt-in (activates with `API_AUTH_TOKEN`) and GET read views are open —
+  whether to require-by-default and protect reads is an operator hardening decision.
+- _License bar:_ whether to ever relax the OSI-only stance (e.g. to accept BSL) — recommended **no**
+  absent a concrete need.

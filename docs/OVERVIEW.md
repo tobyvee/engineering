@@ -17,6 +17,11 @@ full decisions log; this file is a snapshot inventory of what's been built.
 | 6 | `d345d24` | wire delivery loop | workflow drives open-PR → CI poll → merge via activities |
 | 7 | `146f5a6` | coding-agent push | agent proposes file changes → committed to branch (Git Data API) before PR |
 | 8 | `0b1375d` | human-gated deploy | `deploying` status + 2nd gate + Actions `workflow_dispatch` + run poll |
+| 9 | `6ece04c` | project backlog + roadmap | 16 tickets (ENG-001..016), PRD-001 (Kappa consensus), dependency-sequenced ROADMAP |
+| 10 | `7f8e6b6` | Wave 0 — foundations | CI workflow; Temporal workflow tests via `@temporalio/testing` |
+| 11 | `b7db668` | Wave 1 — safety + enablers | API auth + approval identity; structured outputs; CLI sandbox env scrub |
+| 12 | `543d1b8` | Wave 2 — repo context | repo provisioning (PM `git`/`gh`) + two-root workspace; repo-aware coding agents |
+| 13 | `624d363` | Wave 3 — governance | budget reset + atomic reservation; cyclic rework; first-class approvals; budget dashboard |
 
 ## Workspace packages & apps
 
@@ -105,11 +110,11 @@ human approval gates (roadmap · merge · deploy). Every stage is a role agent (
 
 | Item | State |
 |------|-------|
-| Quality gates | typecheck 6/6 · tests 47/47 · web build · Biome lint clean |
+| Quality gates | typecheck · tests **94/94** · web build · Biome lint clean — all **enforced by CI** (`.github/workflows/ci.yml`) on every PR to `main` |
 | Live-proven | vertical slice, delivery loop, all three human gates (roadmap blocks→releases decomposition; merge; deploy), goal/epic authoring; agent planning — shaping (PM→UX→Architect→System Design, 4 stages) + gated decomposition — wired API→Temporal→agent→audit (Postgres + Temporal) |
-| Unit-tested (no live creds) | GitHub adapter (branch/PR/checks/merge/commit/deploy), `parseProposal`/`parseTickets`, `draft`/worker budget guards, pricing/budget |
+| Unit-tested (no live creds) | **Temporal workflows** via `@temporalio/testing` time-skipping (both gates, QA/merge/deploy block paths, **rework loop**, roadmap gate, shaping, heartbeat); GitHub adapter (branch/PR/checks/merge/commit/deploy); `parseProposal`/`parseTickets`; structured-output schemas; `draft`/worker budget guards; pricing + `estimateRunCostCents`; budget reset/reservation helpers (`periodExpired`/`canReserve`); `sandboxEnv` (secret-scrub + PM token); workspace/provision helpers; API `checkAuth` + middleware |
 | Infra | `docker compose up` turnkey: Postgres → auto-migrate → Temporal → UI → server → worker → web |
-| Docs | `CLAUDE.md` (north-star + decisions), `README.md`, this overview |
+| Docs | `CLAUDE.md` (north-star + decisions), `README.md`, this overview, and `project/` (16-ticket backlog, PRD-001, ROADMAP) |
 
 ## Hardening & gaps closed (latest)
 
@@ -120,18 +125,45 @@ human approval gates (roadmap · merge · deploy). Every stage is a role agent (
 | Observability | Audit view renders cost / PR+run links / deploy state / file count |
 | `IssueTracker` | concrete `DbIssueTracker` (Postgres-backed; conforms the store to the interface) |
 | Heartbeat | Temporal Schedule auto-starts `backlog` tickets (verified: ~5s pickup) |
-| Budgets | seeded per role; `implementTicket`/`verifyTicket` read remaining (limit−spent) and record spend |
-| QA/Test | QA agent verifies acceptance criteria after implementation; a fail blocks the ticket |
-| Roadmap gate | `epicDecomposition` blocks on a human sign-off before tickets are created; pending gates surface on the Approvals page (derived from the audit log) |
-| CLI agent sandbox | the `cli` backend (`claude -p`) is full Claude Code, so each agent runs cwd-confined in a throwaway `workspaces/<role>-*` dir (cleaned up) — it can't mutate repo source; the `api` backend is tool-less |
+| Budgets | per-role, **monthly-windowed** (lazy reset); every agent step holds cost via an atomic **reserve→reconcile** so concurrent runs can't jointly overspend (ENG-007) |
+| QA/Test | QA agent verifies acceptance criteria after implementation; a fail drives the cyclic rework loop, then blocks |
+| Approval gates | **first-class persisted records** (roadmap · merge · deploy), created when a gate is reached and resolved with the deciding principal (`decidedBy`); `/api/approvals` lists all kinds (ENG-006) |
+| Agent sandboxes | two roots — throwaway **env-scrubbed** agent-state sandbox (`workspaces/`; secrets withheld, only the PM gets a scoped git/gh token, ENG-005) + persistent **working-code workspace** (`workspace/`) where coding runs against a cloned target repo (ENG-001/013); the `api` backend is tool-less but uses **structured outputs** (ENG-009) |
 | Decomposition | Lead Engineer agent breaks an epic into backlog tickets (`epicDecomposition` workflow); each ticket then runs its own lifecycle |
+| CI | GitHub Actions runs typecheck/lint/test/build on every PR to `main` (ENG-003) |
+| Workflow tests | `@temporalio/testing` time-skipping suite over `ticketLifecycle` / `epicDecomposition` (ENG-002) |
+| API auth | bearer-token middleware on mutating routes (opt-in via `API_AUTH_TOKEN`); approval identity recorded (ENG-004) |
+| Repo provisioning | idempotent `ensureRepoCloned` (shallow clone / ff-pull) into the working-code workspace; PM owns it via granted `git`/`gh` (ENG-013) |
+| Cyclic rework | QA fail → bounded re-implement-with-feedback loop, then `blocked` (ENG-008) |
+| Budget dashboard | `/api/budgets` + a web Budgets page (per-role limit/spent/remaining + unit total) (ENG-010) |
+
+## Roadmap delivered (Waves 0–3 · `project/`)
+
+Waves 0–3 (**14 of the 16** backlog tickets) are merged to `main`; **Wave 4** (provenance + consensus)
+remains (see `project/ROADMAP.md` for the dependency-sequenced plan):
+
+- **Wave 0 — foundations:** ENG-003 CI · ENG-002 Temporal workflow tests · ENG-011/012/015 decisions
+  (GitHub Issues default · A2A monitor-only · SurrealDB no-go).
+- **Wave 1 — safety + enablers:** ENG-004 API auth + approval identity · ENG-009 structured outputs ·
+  ENG-005 CLI sandbox env scrub.
+- **Wave 2 — repo-context critical path:** ENG-013 repo provisioning + two-root workspace · ENG-001
+  repo-aware coding agents.
+- **Wave 3 — governance / observability:** ENG-007 budget reset + reservation · ENG-006 first-class
+  approvals · ENG-010 budget dashboard · ENG-008 cyclic rework.
+- **Wave 4 — provenance + consensus (remaining):** ENG-014 decision log / provenance tree · ENG-016
+  Kappa-style consensus (PRD-001).
 
 ## Not yet built (honest gaps)
 
 - Linear / Jira `IssueTracker` backends (GitHub + Postgres exist); a literal GitHub Wiki
   (`.wiki.git`) KB adapter.
-- **All seven roles drive a stage, behind three human gates** (roadmap · merge · deploy). The plan
-  itself is now gated; shaping (the upstream artifacts) still runs ungated.
-- No remote / CI for this repo itself.
+- **Wave deferrals** (noted in the tickets): literal `claude --allowedTools` tool-name gating — the
+  PM `git`/`gh` boundary is enforced by the scoped token instead (ENG-013); per-epic repo
+  *association* (the target repo is `GITHUB_OWNER`/`GITHUB_REPO` for now); API-backend file-context
+  injection (the CLI backend is the repo-aware path, ENG-001); real GitHub re-push on a rework retry
+  (ENG-008); shaping artifacts still run ungated.
+- API auth is opt-in (activates with `API_AUTH_TOKEN`) and GET read views are open — require-by-default
+  and protecting reads is an operator hardening decision.
+- DB-layer logic in `repo.ts` isn't unit-tested (no live DB in CI); its pure helpers are.
 - A true end-to-end run needs real credentials: `ANTHROPIC_API_KEY` + a GitHub repo / token / deploy
   workflow (it bills and creates real objects).
