@@ -4,8 +4,10 @@ import { type AppEnv, authMiddleware } from "./auth"
 import { persistenceFromEnv } from "./persistence"
 import { artifactPath, SHAPING_STAGES } from "./shaping"
 import {
+  approveArchitecture,
   approveRoadmap,
   approveTicket,
+  startDirectionConsensus,
   startEpicDecomposition,
   startEpicShaping,
   startTicketLifecycle,
@@ -103,6 +105,29 @@ app.get("/api/epics/:id/artifacts", async (c) => {
     if (content) artifacts.push({ stage: stage.key, title: stage.title, content })
   }
   return c.json({ artifacts })
+})
+
+// Kappa-style consensus (ENG-016): the senior technical roles independently rate candidate
+// implementation directions; the agreement coefficient gates adopt-vs-tie-break.
+app.post("/api/epics/:id/consensus", async (c) => {
+  const id = c.req.param("id")
+  await startDirectionConsensus(id)
+  return c.json({ epicId: id, consensus: true })
+})
+
+// Architecture-decision tie-break (invariant #4): release the gate so the consensus round resolves.
+app.post("/api/epics/:id/approve-architecture", async (c) => {
+  const id = c.req.param("id")
+  const signaled = await approveArchitecture(id)
+  const by = c.get("actor")
+  await resolveApproval({ kind: "architecture_decision", epicId: id, decidedBy: by })
+  await persistence.audit.append({
+    actor: "human",
+    kind: "approval_decided",
+    ticketId: null,
+    payload: { epicId: id, gate: "architecture", by, signaled },
+  })
+  return c.json({ epicId: id, gate: "architecture", signaled, by })
 })
 
 // Agent-driven decomposition: the Lead Engineer breaks the epic into backlog tickets — but behind a

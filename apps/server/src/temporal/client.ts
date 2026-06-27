@@ -64,6 +64,34 @@ export async function startEpicDecomposition(epicId: string): Promise<void> {
   }
 }
 
+/** Start Kappa-style direction consensus for an epic (idempotent while one is already running). */
+export async function startDirectionConsensus(epicId: string): Promise<void> {
+  const client = await getTemporalClient()
+  try {
+    await client.workflow.start("directionConsensus", {
+      taskQueue: TASK_QUEUE,
+      workflowId: `epic-consensus-${epicId}`,
+      args: [epicId],
+    })
+  } catch (err) {
+    if ((err as { name?: string })?.name === "WorkflowExecutionAlreadyStartedError") return
+    throw err
+  }
+}
+
+/** Release the architecture-decision tie-break gate for an epic's consensus round (ENG-016). Returns
+ *  false if no consensus round is waiting (advisory, already resolved, or never started). */
+export async function approveArchitecture(epicId: string): Promise<boolean> {
+  const client = await getTemporalClient()
+  const handle = client.workflow.getHandle(`epic-consensus-${epicId}`)
+  try {
+    await handle.signal("architectureApprove")
+    return true
+  } catch {
+    return false
+  }
+}
+
 /** Release the roadmap sign-off gate for an epic. Returns false if no decomposition is waiting
  *  (already decomposed, or never started) — a benign no-op for the UI. */
 export async function approveRoadmap(epicId: string): Promise<boolean> {

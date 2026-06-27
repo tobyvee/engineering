@@ -5,6 +5,17 @@ export { type AssessInput, type Assessment, assess, parseVerdict } from "./asses
 export type { ClaudeWorkerOptions, WorkerBackend, WorkerMode } from "./claude-worker"
 export { ClaudeWorker } from "./claude-worker"
 export {
+  type ProposeDirectionsInput,
+  type ProposedDirection,
+  type ProposedDirections,
+  parseDirections,
+  parseRating,
+  proposeDirections,
+  type RateDirectionsInput,
+  type RaterResult,
+  rateDirections,
+} from "./consensus"
+export {
   type ProposedTicket,
   type ProposedTickets,
   type ProposeTicketsInput,

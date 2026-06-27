@@ -3,15 +3,23 @@ import {
   draft,
   ensureRepoCloned,
   estimateRunCostCents,
+  proposeDirections,
   proposeFileChanges,
   proposeTickets,
+  rateDirections,
   repoWorkspacePath,
 } from "@eng/agents"
 import {
+  type ConsensusCandidate,
+  type ConsensusConfig,
+  type ConsensusInputMode,
   type DeliveryAdapter,
   type DeployState,
+  decide,
   type PullRequestRef,
+  type Rating,
   ROLES,
+  type RoleId,
   type TicketStatus,
 } from "@eng/core"
 import { createApproval, getBudgetRemaining, reconcileSpend, reserveBudget } from "@eng/db"
@@ -20,6 +28,7 @@ import {
   LocalGitDeliveryAdapter,
   localGitBranchFiles,
 } from "@eng/integrations"
+import { consensusConfigFromEnv } from "../consensus"
 import { persistenceFromEnv } from "../persistence"
 import { artifactPath, SHAPING_STAGES } from "../shaping"
 import { startTicketLifecycle } from "./client"
@@ -659,5 +668,199 @@ export async function recordDeploy(ticketId: string, state: DeployState): Promis
     kind: state === "success" ? "deployed" : "deploy_failed",
     ticketId,
     payload: { state },
+  })
+}
+
+// --- Kappa-style consensus (ENG-016 / PRD-001) -------------------------------
+
+/** Candidates + the resolved per-unit config — the workflow needs both to fan out the raters. */
+export interface ConsensusKickoff {
+  candidates: ConsensusCandidate[]
+  config: ConsensusConfig
+}
+
+/**
+ * Generate 2–4 distinct candidate implementation directions (Lead System Design), informed by the
+ * epic's shaping artifacts. Budget-enforced + audited; returns null (no-op) when the runtime is
+ * unavailable or the budget is exhausted, so the lifecycle proceeds normally.
+ */
+export async function generateDirections(epicId: string): Promise<ConsensusKickoff | null> {
+  const config = consensusConfigFromEnv()
+  const role = ROLES.lead_system_design
+  const remaining = (await getBudgetRemaining(role.id)) ?? role.monthlyBudgetCents
+  const held = await reserveBudget(role.id, estimateRunCostCents(remaining))
+  if (held === null) {
+    await persistence.audit.append({
+      actor: "system",
+      kind: "consensus_skipped",
+      ticketId: null,
+      payload: { epicId, stage: "candidates", reason: "budget_exhausted" },
+    })
+    return null
+  }
+  const [epicCtx, artifacts] = await Promise.all([
+    persistence.hierarchy.epicContext(epicId),
+    epicArtifacts(epicId),
+  ])
+  try {
+    const proposed = await proposeDirections({
+      role: role.id,
+      systemPrompt: role.systemPrompt,
+      goalContext: [epicCtx, ...artifacts].join("\n\n"),
+      task: "Enumerate the candidate implementation directions for this epic's core feature.",
+      budgetCentsRemaining: remaining,
+    })
+    await reconcileSpend(role.id, held, proposed.costCents)
+    const candidates: ConsensusCandidate[] = proposed.candidates.map((c, i) => ({
+      id: `c${i + 1}`,
+      title: c.title,
+      summary: c.summary,
+      tradeoffs: c.tradeoffs,
+    }))
+    await persistence.audit.append({
+      actor: role.id,
+      kind: "consensus_candidates",
+      ticketId: null,
+      payload: { epicId, candidates: candidates.length, costCents: proposed.costCents },
+    })
+    return { candidates, config }
+  } catch (err) {
+    await reconcileSpend(role.id, held, 0)
+    await persistence.audit.append({
+      actor: "system",
+      kind: "consensus_skipped",
+      ticketId: null,
+      payload: { epicId, stage: "candidates", error: String(err) },
+    })
+    return null
+  }
+}
+
+/**
+ * One rater scores/ranks the candidates **independently** (no rater sees another's input — that's
+ * what makes the agreement coefficient meaningful). Budget-enforced per role; audited. Returns null
+ * when the runtime is unavailable so `decide` simply has one fewer rating.
+ */
+export async function rateDirection(
+  epicId: string,
+  candidates: ConsensusCandidate[],
+  raterRole: RoleId,
+  inputMode: ConsensusInputMode,
+): Promise<Rating | null> {
+  const role = ROLES[raterRole]
+  const remaining = (await getBudgetRemaining(role.id)) ?? role.monthlyBudgetCents
+  const held = await reserveBudget(role.id, estimateRunCostCents(remaining))
+  if (held === null) {
+    await persistence.audit.append({
+      actor: "system",
+      kind: "consensus_skipped",
+      ticketId: null,
+      payload: { epicId, stage: "rating", raterRole, reason: "budget_exhausted" },
+    })
+    return null
+  }
+  try {
+    const epicCtx = await persistence.hierarchy.epicContext(epicId)
+    const { rating, costCents } = await rateDirections({
+      role: role.id,
+      systemPrompt: role.systemPrompt,
+      goalContext: epicCtx,
+      candidates: candidates.map((c) => ({ id: c.id, title: c.title, summary: c.summary })),
+      criteria: consensusConfigFromEnv().criteria,
+      inputMode,
+      budgetCentsRemaining: remaining,
+    })
+    await reconcileSpend(role.id, held, costCents)
+    await persistence.audit.append({
+      actor: role.id,
+      kind: "consensus_rating",
+      ticketId: null,
+      payload: { epicId, pick: rating.pick, ranking: rating.ranking, costCents },
+    })
+    return rating
+  } catch (err) {
+    await reconcileSpend(role.id, held, 0)
+    await persistence.audit.append({
+      actor: "system",
+      kind: "consensus_skipped",
+      ticketId: null,
+      payload: { epicId, stage: "rating", raterRole, error: String(err) },
+    })
+    return null
+  }
+}
+
+/**
+ * Aggregate the ratings, compute the agreement coefficient, and decide. Persists the outcome to the
+ * audit log and the decision graph (ENG-014), traceable to the originating request. Returns whether
+ * consensus was reached (the workflow branches on it for the tie-breaker).
+ */
+export async function decideConsensus(
+  epicId: string,
+  candidates: ConsensusCandidate[],
+  ratings: (Rating | null)[],
+): Promise<{ consensusReached: boolean; winner: string | null }> {
+  const config = consensusConfigFromEnv()
+  const valid = ratings.filter((r): r is Rating => r !== null)
+  const decision = decide(candidates, valid, config)
+  const winnerCand = candidates.find((c) => c.id === decision.winner) ?? null
+  const totalCost = valid.reduce((s, r) => s + (r.costCents ?? 0), 0)
+
+  const event = await persistence.audit.append({
+    actor: "lead_architect",
+    kind: "consensus_decided",
+    ticketId: null,
+    payload: {
+      epicId,
+      winner: decision.winner,
+      consensusReached: decision.consensusReached,
+      coefficient: decision.coefficient,
+      metric: decision.metric,
+      method: decision.aggregateMethod,
+      threshold: config.threshold,
+      advisory: config.advisory,
+      raters: valid.length,
+    },
+  })
+  await recordStepDecision({
+    epicId,
+    actor: "lead_architect",
+    stage: "architecture",
+    statement: winnerCand
+      ? `Consensus direction: ${winnerCand.title}`
+      : "No clear consensus direction",
+    rationale:
+      `${decision.aggregateMethod} winner from ${valid.length} independent raters; agreement ` +
+      `${decision.metric}=${decision.coefficient.toFixed(2)} vs threshold ${config.threshold} → ` +
+      `${decision.consensusReached ? "consensus reached" : "tie-break required"}`,
+    alternatives: candidates
+      .filter((c) => c.id !== decision.winner)
+      .map((c) => ({ option: c.title, rejectedBecause: "not the consensus winner" })),
+    confidence: Math.max(0, Math.min(1, decision.coefficient)),
+    costCents: totalCost,
+    auditEventId: event.id,
+  })
+  return { consensusReached: decision.consensusReached, winner: decision.winner }
+}
+
+/** Record that an epic's implementation direction awaits the human architecture sign-off (tie-break).
+ *  Creates a first-class pending approval (ENG-006) plus the audit event. */
+export async function requestArchitectureApproval(epicId: string): Promise<void> {
+  await createApproval({ kind: "architecture_decision", epicId, requestedByRole: "lead_architect" })
+  await persistence.audit.append({
+    actor: "lead_architect",
+    kind: "architecture_requested",
+    ticketId: null,
+    payload: { epicId },
+  })
+}
+
+/** Record the human architecture sign-off (the tie-break gate released the consensus). */
+export async function recordArchitectureApproval(epicId: string): Promise<void> {
+  await persistence.audit.append({
+    actor: "human",
+    kind: "architecture_approved",
+    ticketId: null,
+    payload: { epicId },
   })
 }
