@@ -103,7 +103,13 @@ services:
       GITHUB_DEPLOY_REF: ${GITHUB_DEPLOY_REF:-main}
       PERSISTENCE_BACKEND: ${PERSISTENCE_BACKEND:-postgres}
       GITHUB_DOCS_PREFIX: ${GITHUB_DOCS_PREFIX:-docs}
+      # Delivery backend (ENG-017): set DELIVERY_BACKEND=local to commit the agent's code to a local
+      # git repo under ./workspace (no GitHub needed); unset/`github` uses the GitHub adapter.
+      DELIVERY_BACKEND: ${DELIVERY_BACKEND:-}
     command: ["pnpm", "--filter", "@eng/server", "worker"]
+    # Surface the working-code workspace (local-git commits) on the host so you can inspect the repo.
+    volumes:
+      - ./workspace:/app/workspace
 
   web:
     build:

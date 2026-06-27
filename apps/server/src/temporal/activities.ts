@@ -5,6 +5,7 @@ import {
   estimateRunCostCents,
   proposeFileChanges,
   proposeTickets,
+  repoWorkspacePath,
 } from "@eng/agents"
 import {
   type DeliveryAdapter,
@@ -14,7 +15,11 @@ import {
   type TicketStatus,
 } from "@eng/core"
 import { createApproval, getBudgetRemaining, reconcileSpend, reserveBudget } from "@eng/db"
-import { createGitHubDelivery } from "@eng/integrations"
+import {
+  createGitHubDelivery,
+  LocalGitDeliveryAdapter,
+  localGitBranchFiles,
+} from "@eng/integrations"
 import { persistenceFromEnv } from "../persistence"
 import { artifactPath, SHAPING_STAGES } from "../shaping"
 import { startTicketLifecycle } from "./client"
@@ -224,15 +229,24 @@ export async function pickUpBacklog(): Promise<number> {
 
 // --- Delivery (GitHub) -------------------------------------------------------
 
+const BASE_BRANCH = process.env.GITHUB_BASE_BRANCH ?? "main"
+
+/** The local working-code repo path for DELIVERY_BACKEND=local (ENG-017). */
+function localRepoDir(): string {
+  return repoWorkspacePath(process.env.GITHUB_OWNER || "local", process.env.GITHUB_REPO || "app")
+}
+
 function deliveryFromEnv(): DeliveryAdapter | null {
+  // Local-git delivery (ENG-017): commit the agent's code to a local repo — no GitHub needed.
+  if (process.env.DELIVERY_BACKEND === "local") {
+    return new LocalGitDeliveryAdapter({ repoDir: localRepoDir(), baseBranch: BASE_BRANCH })
+  }
   const token = process.env.GITHUB_TOKEN
   const owner = process.env.GITHUB_OWNER
   const repo = process.env.GITHUB_REPO
   if (!token || !owner || !repo) return null
   return createGitHubDelivery({ token, owner, repo, baseBranch: process.env.GITHUB_BASE_BRANCH })
 }
-
-const BASE_BRANCH = process.env.GITHUB_BASE_BRANCH ?? "main"
 const DEPLOY_WORKFLOW = process.env.GITHUB_DEPLOY_WORKFLOW
 const DEPLOY_REF = process.env.GITHUB_DEPLOY_REF ?? BASE_BRANCH
 
@@ -436,14 +450,30 @@ export async function verifyTicket(
     persistence.tracker.get(ticketId),
     persistence.hierarchy.traceContext(ticketId),
   ])
+
+  // ENG-017: when delivery commits to a local repo, hand the QA agent the actual committed files so it
+  // can verify real code (the api backend is tool-less and otherwise can't see the changes). This also
+  // distinguishes "nothing was committed" from "committed but failed verification".
+  let evidence = ""
+  if (process.env.DELIVERY_BACKEND === "local") {
+    const files = await localGitBranchFiles(localRepoDir(), `ticket/${ticketId}`)
+    evidence = files.length
+      ? `\n\nThe following changes were committed for this ticket — verify them against the criteria:\n${files
+          .map((f) => `\n----- ${f.path} -----\n${f.content}`)
+          .join("\n")}`
+      : "\n\nNote: no code was committed for this ticket; there is nothing to verify."
+  }
+
   try {
     const verdict = await assess({
       role: role.id,
       systemPrompt: role.systemPrompt,
       goalContext,
-      task: ticket
-        ? `Verify ticket "${ticket.title}" meets its acceptance criteria: ${ticket.acceptanceCriteria.join("; ") || "(none specified)"}.`
-        : `Verify ticket ${ticketId}.`,
+      task: `${
+        ticket
+          ? `Verify ticket "${ticket.title}" meets its acceptance criteria: ${ticket.acceptanceCriteria.join("; ") || "(none specified)"}.`
+          : `Verify ticket ${ticketId}.`
+      }${evidence}`,
       budgetCentsRemaining: remaining,
     })
     await reconcileSpend(role.id, held, verdict.costCents)

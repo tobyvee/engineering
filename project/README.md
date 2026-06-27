@@ -25,8 +25,14 @@ mirror the `TicketStatus`, `LifecycleStage`, and `RoleId` enums in `packages/cor
 | [ENG-014](ENG-014-decision-log-and-provenance-tree.md) | Per-agent decision logs & a traceable decision tree | P2 | core · db · server |
 | [ENG-015](ENG-015-evaluate-surrealdb-backend.md) | Evaluate SurrealDB as a persistence backend (decision spike) | P2 | core · db · infra |
 | [ENG-016](ENG-016-implement-kappa-consensus.md) | Implement Kappa-style consensus (PRD-001) | P2 | core · agents · server |
+| [ENG-017](ENG-017-local-git-delivery.md) | Local-git DeliveryAdapter (commit without GitHub) | P1 | integrations · server |
 
 **Priority key:** P0 = do before any live autonomous run · P1 = high · P2 = medium · P3 = low.
+
+> ENG-017 and the `fix/worker-temporal-connection` worker fix were added after a first live run
+> surfaced them (the worker couldn't reach Temporal in Docker; and a no-GitHub run produced no
+> verifiable code). Status: Waves 0–3 done (14 tickets); **ENG-014 and ENG-016 (Wave 4) remain**;
+> ENG-017 done.
 
 ## Product requirements (PRDs)
 
