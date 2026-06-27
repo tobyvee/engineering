@@ -75,6 +75,7 @@ services:
       TEMPORAL_TASK_QUEUE: engineering
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
     command: ["pnpm", "--filter", "@eng/server", "start"]
+    restart: on-failure
     ports:
       - "3000:3000"
 
@@ -104,6 +105,7 @@ services:
       PERSISTENCE_BACKEND: ${PERSISTENCE_BACKEND:-postgres}
       GITHUB_DOCS_PREFIX: ${GITHUB_DOCS_PREFIX:-docs}
     command: ["pnpm", "--filter", "@eng/server", "worker"]
+    restart: on-failure
 
   web:
     build:
