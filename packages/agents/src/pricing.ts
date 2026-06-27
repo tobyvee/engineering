@@ -1,3 +1,5 @@
+import { DEFAULT_MODEL } from "./prompt"
+
 /** Token pricing in **cents per million tokens** (input / output). Source: Claude API pricing. */
 const PRICING: Record<string, { input: number; output: number }> = {
   "claude-opus-4-8": { input: 500, output: 2500 },
@@ -39,4 +41,18 @@ export function affordableMaxTokens(model: string, budgetCents: number, cap: num
   if (centsPerOutputToken <= 0) return cap
   const affordable = Math.floor(budgetCents / centsPerOutputToken)
   return Math.max(256, Math.min(cap, affordable))
+}
+
+/**
+ * Worst-case cost (cents) to hold up front for one run (ENG-007): the affordable output-token cap at
+ * the model's output rate. Reserving this per run lets concurrent runs for a role avoid jointly
+ * overspending the budget; the hold is reconciled to the actual cost after the run completes.
+ */
+export function estimateRunCostCents(
+  budgetCentsRemaining: number,
+  model: string = DEFAULT_MODEL,
+): number {
+  const tokens = affordableMaxTokens(model, budgetCentsRemaining, 16000)
+  const perToken = priceFor(model).output / 1_000_000
+  return Math.max(1, Math.ceil(tokens * perToken))
 }

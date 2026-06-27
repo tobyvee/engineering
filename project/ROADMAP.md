@@ -26,20 +26,27 @@ high-leverage enablers forward even when labelled P1/P2.
   (SurrealDB — no-go on wholesale replacement; one item awaits the lead: relax the OSI-only license
   bar? recommended *no* for now).
 
-### Wave 1 — Safety + enablers (independent, high-leverage)
-- **ENG-004** — API auth + approval identity (P0 security gate before any live/shared run).
-- **ENG-009** — Structured outputs (enabler for ENG-001 quality, ENG-014, ENG-016).
-- **ENG-005** — Scrub the CLI sandbox env (security; prerequisite for the repo-context chain).
+### Wave 1 — Safety + enablers (independent, high-leverage) — ✅ complete (2026-06-27)
+- **ENG-004** ✅ — API auth + approval identity (bearer token on mutating `/api/*`; principal stamped
+  on `approval_decided` audit events; dev-mode warn when unset).
+- **ENG-009** ✅ — Structured outputs (API backend emits `output_config.format`; hand-written schemas;
+  parse-failure vs empty-set audited distinctly).
+- **ENG-005** ✅ — Scrub the CLI sandbox env (allow-listed `sandboxEnv()`; host secrets withheld).
 
-### Wave 2 — Repo-context critical path
-- **ENG-013** — Repo provisioning (PM `git`/`gh`) + two-root workspace. Needs ENG-005.
-- **ENG-001** — Repo-aware coding agents. Needs ENG-013; benefits from ENG-009.
+### Wave 2 — Repo-context critical path — ✅ complete (2026-06-27)
+- **ENG-013** ✅ — Two-root workspace + PM `git`/`gh` grant + PM-scoped token + idempotent
+  `ensureRepoCloned`, wired+audited in `implementTicket`. (Deferred: literal `--allowedTools` gating;
+  per-epic repo association.)
+- **ENG-001** ✅ — `WorkerInput.workdir`; CLI backend runs in the cloned repo cwd so agents read/edit
+  real source. (Deferred: API-backend file-context injection.)
 
-### Wave 3 — Governance / observability
-- **ENG-007** — Budget model (reset + reservation). Do first in this wave — gates 010 and 008.
-- **ENG-006** — First-class approvals. Builds on ENG-004's identity.
-- **ENG-010** — Budget/cost dashboard. Needs ENG-007.
-- **ENG-008** — Cyclic rework routing. Needs ENG-007 + ENG-002.
+### Wave 3 — Governance / observability — ✅ complete (2026-06-27)
+- **ENG-007** ✅ — Monthly reset (`period_start`, lazy rollover) + atomic reserve/reconcile across all
+  agent activities.
+- **ENG-006** ✅ — First-class persisted approvals (added `epic_id`); pending records per gate,
+  resolved with `decidedBy`; `/api/approvals` covers roadmap · merge · deploy.
+- **ENG-010** ✅ — `/api/budgets` + web Budgets page (per-role limit/spent/remaining + total).
+- **ENG-008** ✅ — Bounded implement→review→QA rework loop with QA feedback, then blocked.
 
 ### Wave 4 — Provenance + consensus
 - **ENG-014** — Decision log / provenance tree. Needs ENG-009; build on the Postgres+KB default behind

@@ -16,6 +16,7 @@ const {
   runShapingStage,
   requestRoadmapSignoff,
   recordRoadmapApproval,
+  requestApproval,
 } = proxyActivities<typeof activities>({
   startToCloseTimeout: "10 minutes",
   retry: { maximumAttempts: 3 },
@@ -68,6 +69,8 @@ const CI_POLL_INTERVAL = "30 seconds"
 const CI_MAX_POLLS = 20
 const DEPLOY_POLL_INTERVAL = "30 seconds"
 const DEPLOY_MAX_POLLS = 20
+/** Bounded implement→review→QA rework attempts before a ticket is blocked for a human (ENG-008). */
+const MAX_IMPLEMENT_ATTEMPTS = 2
 
 /**
  * The ticket lifecycle as a durable state machine, with the full delivery + deploy loop:
@@ -89,15 +92,21 @@ export async function ticketLifecycle(ticketId: string): Promise<void> {
 
   await transitionTicket(ticketId, "planned")
   await sleep("2 seconds")
-  await transitionTicket(ticketId, "in_progress")
 
-  // Agent writes the code and (when GitHub is configured) pushes a branch + opens a PR.
-  const pr = await implementTicket(ticketId)
-  await transitionTicket(ticketId, "in_review")
-
-  // QA quality gate: the QA agent verifies the acceptance criteria before review/merge.
-  const qaOk = await verifyTicket(ticketId)
-  if (!qaOk) {
+  // Cyclic rework (ENG-008): implement → review → QA, bouncing back to in_progress with the QA
+  // feedback on a fail, up to MAX_IMPLEMENT_ATTEMPTS, then block for human attention.
+  let pr: Awaited<ReturnType<typeof implementTicket>> = null
+  let passed = false
+  let feedback: string | undefined
+  for (let attempt = 1; attempt <= MAX_IMPLEMENT_ATTEMPTS && !passed; attempt++) {
+    await transitionTicket(ticketId, "in_progress")
+    pr = await implementTicket(ticketId, feedback)
+    await transitionTicket(ticketId, "in_review")
+    const qa = await verifyTicket(ticketId)
+    passed = qa.passed
+    feedback = qa.feedback
+  }
+  if (!passed) {
     await transitionTicket(ticketId, "blocked")
     return
   }
@@ -111,7 +120,8 @@ export async function ticketLifecycle(ticketId: string): Promise<void> {
     }
   }
 
-  // Merge gate: block until the human lead signs off on the merge.
+  // Merge gate: record a pending approval (ENG-006), then block until the human lead signs off.
+  await requestApproval("pr_merge", ticketId)
   await condition(() => approved.merge)
   const merged = pr ? await mergeDelivery(ticketId, pr) : true
   if (!merged) {
@@ -119,8 +129,9 @@ export async function ticketLifecycle(ticketId: string): Promise<void> {
     return
   }
 
-  // Ship: human-gated deploy.
+  // Ship: human-gated deploy (record a pending approval first, ENG-006).
   await transitionTicket(ticketId, "deploying")
+  await requestApproval("deploy", ticketId)
   await condition(() => approved.deploy)
   const afterRunId = await startDeploy(ticketId)
   if (afterRunId !== null) {

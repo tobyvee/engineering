@@ -1,10 +1,18 @@
 # ENG-008 — Implement cyclic review/blocked rework routing
 
-- **Status:** backlog
+- **Status:** done
 - **Priority:** P2 (Medium)
 - **Stage:** architecture
 - **Assignee role:** lead_system_design (with lead_architect input)
 - **Area:** apps/server
+
+> **Outcome (Wave 3):** `ticketLifecycle` now runs a **bounded rework loop** — implement → review →
+> QA, bouncing back to `in_progress` with the QA feedback on a fail, up to `MAX_IMPLEMENT_ATTEMPTS`
+> (2), then `blocked` for a human. `verifyTicket` returns `{ passed, feedback }` and `implementTicket`
+> accepts the feedback (threaded into the next coding prompt). Covered by `@temporalio/testing` harness
+> tests: rework-once-then-pass (asserts the feedback is fed and the ticket reaches `done`) and
+> exhaust-attempts-then-blocked. *Deferred:* on a real GitHub retry the per-ticket branch already
+> exists — re-pushing to the same branch instead of re-creating it is a delivery follow-up.
 
 ## Problem
 

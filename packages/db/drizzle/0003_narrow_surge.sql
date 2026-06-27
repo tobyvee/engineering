@@ -1,0 +1,1 @@
+ALTER TABLE "budgets" ADD COLUMN "period_start" timestamp with time zone DEFAULT now() NOT NULL;

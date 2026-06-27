@@ -1,10 +1,18 @@
 # ENG-006 — Make approval gates first-class, persisted entities
 
-- **Status:** backlog
+- **Status:** done
 - **Priority:** P2 (Medium)
 - **Stage:** design
 - **Assignee role:** lead_system_design
 - **Area:** packages/core · apps/server
+
+> **Outcome (Wave 3):** Approvals are now first-class persisted records (the `approvals` table already
+> existed; added an `epic_id` column — core schema + migration `0004` — so roadmap/epic gates fit too).
+> Repo: `createApproval` / `resolveApproval` / `listPendingApprovals`. Each gate creates a pending
+> record (`requestRoadmapSignoff` + a new `requestApproval` activity called before the merge and deploy
+> conditions); the approve endpoints resolve it with `decidedBy` (the authenticated principal from
+> ENG-004). `/api/approvals` now reads the table across **all** gate kinds (roadmap · pr_merge ·
+> deploy), and the web Approvals page dispatches the right approve call per kind.
 
 ## Problem
 

@@ -1,4 +1,11 @@
-import { assess, draft, proposeFileChanges, proposeTickets } from "@eng/agents"
+import {
+  assess,
+  draft,
+  ensureRepoCloned,
+  estimateRunCostCents,
+  proposeFileChanges,
+  proposeTickets,
+} from "@eng/agents"
 import {
   type DeliveryAdapter,
   type DeployState,
@@ -6,7 +13,7 @@ import {
   ROLES,
   type TicketStatus,
 } from "@eng/core"
-import { addSpend, getBudgetRemaining } from "@eng/db"
+import { createApproval, getBudgetRemaining, reconcileSpend, reserveBudget } from "@eng/db"
 import { createGitHubDelivery } from "@eng/integrations"
 import { persistenceFromEnv } from "../persistence"
 import { artifactPath, SHAPING_STAGES } from "../shaping"
@@ -51,6 +58,16 @@ export async function runShapingStage(epicId: string, stageKey: string): Promise
   if (!stage) return
   const role = ROLES[stage.role]
   const remaining = (await getBudgetRemaining(role.id)) ?? role.monthlyBudgetCents
+  const held = await reserveBudget(role.id, estimateRunCostCents(remaining))
+  if (held === null) {
+    await persistence.audit.append({
+      actor: "system",
+      kind: "artifact_skipped",
+      ticketId: null,
+      payload: { epicId, stage: stageKey, reason: "budget_exhausted" },
+    })
+    return
+  }
 
   const epicCtx = await persistence.hierarchy.epicContext(epicId)
   const prior: string[] = []
@@ -69,7 +86,7 @@ export async function runShapingStage(epicId: string, stageKey: string): Promise
       task: stage.task,
       budgetCentsRemaining: remaining,
     })
-    await addSpend(role.id, result.costCents)
+    await reconcileSpend(role.id, held, result.costCents)
     await persistence.knowledge.write(
       artifactPath(epicId, stageKey),
       `# ${stage.title}\n\n${result.content}\n`,
@@ -81,6 +98,7 @@ export async function runShapingStage(epicId: string, stageKey: string): Promise
       payload: { epicId, stage: stageKey, costCents: result.costCents },
     })
   } catch (err) {
+    await reconcileSpend(role.id, held, 0) // release the hold
     await persistence.audit.append({
       actor: "system",
       kind: "artifact_skipped",
@@ -90,14 +108,24 @@ export async function runShapingStage(epicId: string, stageKey: string): Promise
   }
 }
 
-/** Record that an epic's plan is awaiting the human roadmap sign-off (the gate is pending). */
+/** Record that an epic's plan is awaiting the human roadmap sign-off (the gate is pending). Creates a
+ *  first-class pending approval (ENG-006) plus the audit event. */
 export async function requestRoadmapSignoff(epicId: string): Promise<void> {
+  await createApproval({ kind: "roadmap", epicId, requestedByRole: "lead_engineer" })
   await persistence.audit.append({
     actor: "lead_engineer",
     kind: "roadmap_requested",
     ticketId: null,
     payload: { epicId },
   })
+}
+
+/** Create a pending approval record for a ticket gate (merge/deploy) — ENG-006. */
+export async function requestApproval(
+  kind: "pr_merge" | "deploy",
+  ticketId: string,
+): Promise<void> {
+  await createApproval({ kind, ticketId, requestedByRole: "lead_engineer" })
 }
 
 /** Record the human roadmap sign-off (the gate released decomposition). */
@@ -125,6 +153,16 @@ export async function decomposeEpic(epicId: string): Promise<string[]> {
   ])
   const goalContext = [epicCtx, ...artifacts].join("\n\n")
   const remaining = (await getBudgetRemaining(role.id)) ?? role.monthlyBudgetCents
+  const held = await reserveBudget(role.id, estimateRunCostCents(remaining))
+  if (held === null) {
+    await persistence.audit.append({
+      actor: "system",
+      kind: "decomposition_skipped",
+      ticketId: null,
+      payload: { epicId, reason: "budget_exhausted" },
+    })
+    return []
+  }
 
   let proposed: Awaited<ReturnType<typeof proposeTickets>>
   try {
@@ -135,8 +173,9 @@ export async function decomposeEpic(epicId: string): Promise<string[]> {
       task: "Decompose this epic into implementable tickets.",
       budgetCentsRemaining: remaining,
     })
-    await addSpend(role.id, proposed.costCents)
+    await reconcileSpend(role.id, held, proposed.costCents)
   } catch (err) {
+    await reconcileSpend(role.id, held, 0) // release the hold
     await persistence.audit.append({
       actor: "system",
       kind: "decomposition_skipped",
@@ -202,7 +241,10 @@ const DEPLOY_REF = process.env.GITHUB_DEPLOY_REF ?? BASE_BRANCH
  * — if GitHub is configured — the changes are committed to a ticket branch and a PR is opened.
  * Returns the PR (for the later merge) or null.
  */
-export async function implementTicket(ticketId: string): Promise<PullRequestRef | null> {
+export async function implementTicket(
+  ticketId: string,
+  feedback?: string,
+): Promise<PullRequestRef | null> {
   const role = ROLES.staff_engineer
   const [ticket, goalContext] = await Promise.all([
     persistence.tracker.get(ticketId),
@@ -213,18 +255,68 @@ export async function implementTicket(ticketId: string): Promise<PullRequestRef 
   // Central budget enforcement (invariant #3): remaining = limit − spent from the budgets table.
   const remaining = (await getBudgetRemaining(role.id)) ?? role.monthlyBudgetCents
 
+  // Reserve worst-case cost up front (ENG-007) so concurrent runs can't jointly overspend; reconciled
+  // to actual after the run. A null hold means the budget is exhausted — skip this step.
+  const held = await reserveBudget(role.id, estimateRunCostCents(remaining))
+  if (held === null) {
+    await persistence.audit.append({
+      actor: "system",
+      kind: "agent_step_skipped",
+      ticketId,
+      payload: { stage: "implementation", reason: "budget_exhausted" },
+    })
+    return null
+  }
+
+  // ENG-013/ENG-001: ensure the target repo is cloned into the working-code workspace (idempotent),
+  // then point the coding agent at it so it reads/edits real source. No-op (audited) without GitHub.
+  let workdir: string | undefined
+  try {
+    const clone = await ensureRepoCloned()
+    if (clone) {
+      workdir = clone.path
+      await persistence.audit.append({
+        actor: "staff_engineer",
+        kind: "repo_context_ready",
+        ticketId,
+        payload: { path: clone.path, action: clone.action },
+      })
+    } else {
+      await persistence.audit.append({
+        actor: "system",
+        kind: "repo_context_skipped",
+        ticketId,
+        payload: { reason: "GitHub not configured" },
+      })
+    }
+  } catch (err) {
+    await persistence.audit.append({
+      actor: "system",
+      kind: "repo_context_skipped",
+      ticketId,
+      payload: { error: String(err) },
+    })
+  }
+
   let proposed: Awaited<ReturnType<typeof proposeFileChanges>> | null = null
   try {
     proposed = await proposeFileChanges({
       role: role.id,
       systemPrompt: role.systemPrompt,
       goalContext,
-      task: ticket
-        ? `Implement ticket "${ticket.title}": ${ticket.description || "(no description provided)"}.`
-        : `Implement ticket ${ticketId}.`,
+      task: `${
+        ticket
+          ? `Implement ticket "${ticket.title}": ${ticket.description || "(no description provided)"}.`
+          : `Implement ticket ${ticketId}.`
+      }${
+        feedback
+          ? `\n\nThis is a rework attempt. Address the QA feedback from the previous attempt: ${feedback}`
+          : ""
+      }`,
       budgetCentsRemaining: remaining,
+      workdir,
     })
-    await addSpend(role.id, proposed.costCents)
+    await reconcileSpend(role.id, held, proposed.costCents)
     await persistence.audit.append({
       actor: "staff_engineer",
       kind: "agent_step",
@@ -238,6 +330,7 @@ export async function implementTicket(ticketId: string): Promise<PullRequestRef 
       },
     })
   } catch (err) {
+    await reconcileSpend(role.id, held, 0) // release the hold
     await persistence.audit.append({
       actor: "system",
       kind: "agent_step_skipped",
@@ -276,11 +369,17 @@ export async function implementTicket(ticketId: string): Promise<PullRequestRef 
     return null
   }
   if (!proposed || proposed.files.length === 0) {
+    // Distinguish a genuine empty change set from a parse failure (ENG-009).
+    const reason = !proposed
+      ? "agent runtime unavailable"
+      : proposed.parsed
+        ? "no file changes proposed"
+        : "agent output could not be parsed"
     await persistence.audit.append({
       actor: "system",
       kind: "delivery_skipped",
       ticketId,
-      payload: { reason: "no file changes proposed" },
+      payload: { reason },
     })
     return null
   }
@@ -318,9 +417,21 @@ export async function implementTicket(ticketId: string): Promise<PullRequestRef 
  * QA quality gate: a QA/Test agent verifies the acceptance criteria. Returns false only on a real
  * fail verdict; a QA runtime error (e.g. no credentials) records `qa_skipped` and does not block.
  */
-export async function verifyTicket(ticketId: string): Promise<boolean> {
+export async function verifyTicket(
+  ticketId: string,
+): Promise<{ passed: boolean; feedback: string }> {
   const role = ROLES.qa_test
   const remaining = (await getBudgetRemaining(role.id)) ?? role.monthlyBudgetCents
+  const held = await reserveBudget(role.id, estimateRunCostCents(remaining))
+  if (held === null) {
+    await persistence.audit.append({
+      actor: "system",
+      kind: "qa_skipped",
+      ticketId,
+      payload: { reason: "budget_exhausted" },
+    })
+    return { passed: true, feedback: "" }
+  }
   const [ticket, goalContext] = await Promise.all([
     persistence.tracker.get(ticketId),
     persistence.hierarchy.traceContext(ticketId),
@@ -335,22 +446,23 @@ export async function verifyTicket(ticketId: string): Promise<boolean> {
         : `Verify ticket ${ticketId}.`,
       budgetCentsRemaining: remaining,
     })
-    await addSpend(role.id, verdict.costCents)
+    await reconcileSpend(role.id, held, verdict.costCents)
     await persistence.audit.append({
       actor: "qa_test",
       kind: verdict.passed ? "qa_passed" : "qa_failed",
       ticketId,
       payload: { summary: verdict.summary, costCents: verdict.costCents },
     })
-    return verdict.passed
+    return { passed: verdict.passed, feedback: verdict.summary }
   } catch (err) {
+    await reconcileSpend(role.id, held, 0) // release the hold
     await persistence.audit.append({
       actor: "system",
       kind: "qa_skipped",
       ticketId,
       payload: { error: String(err) },
     })
-    return true
+    return { passed: true, feedback: "" }
   }
 }
 

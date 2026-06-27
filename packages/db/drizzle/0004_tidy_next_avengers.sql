@@ -1,0 +1,2 @@
+ALTER TABLE "approvals" ADD COLUMN "epic_id" uuid;--> statement-breakpoint
+ALTER TABLE "approvals" ADD CONSTRAINT "approvals_epic_id_epics_id_fk" FOREIGN KEY ("epic_id") REFERENCES "public"."epics"("id") ON DELETE no action ON UPDATE no action;

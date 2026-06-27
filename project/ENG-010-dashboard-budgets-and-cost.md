@@ -1,10 +1,15 @@
 # ENG-010 — Surface budgets and cost in the dashboard
 
-- **Status:** backlog
+- **Status:** done
 - **Priority:** P2 (Medium)
 - **Stage:** design
 - **Assignee role:** ux_design (build by staff_engineer)
 - **Area:** apps/web
+
+> **Outcome (Wave 3):** `listBudgets` repo helper + typed `/api/budgets` endpoint (per-scope
+> limit/spent/remaining). A new web **Budgets** page (TanStack Query, auto-refresh) shows each role's
+> limit/spent/remaining in dollars plus a unit total, with a nav link + route. Verified via the web
+> build. Pairs with ENG-007's now-meaningful monthly budgets.
 
 ## Problem
 

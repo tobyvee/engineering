@@ -1,10 +1,22 @@
 # ENG-001 — Give coding agents real repository context
 
-- **Status:** backlog
+- **Status:** done
 - **Priority:** P0 (Critical — blocks a usable autonomous run)
 - **Stage:** implementation
 - **Assignee role:** staff_engineer (with lead_system_design input)
 - **Area:** packages/agents
+
+> **Outcome (Wave 2):** `WorkerInput.workdir` added; the **CLI backend** runs `claude -p` with its cwd
+> set to the provided workdir (the cloned target repo from ENG-013) so the agent reads and edits real
+> source — and a provided workdir is *persistent* (not cleaned up like the throwaway sandbox).
+> `proposeFileChanges` forwards `workdir`; `implementTicket` clones the repo (ENG-013) and passes the
+> path so the Staff Engineer codes against real files, auditing `repo_context_ready` /
+> `repo_context_skipped`. The product's own tree is never touched (the agent works under the separate
+> working-code workspace). Test: the agent reads a seeded file in the workdir and the workdir is left
+> intact.
+>
+> *Deferred (noted):* the **API backend** is tool-less, so file-context injection for it (a directory
+> tree / key files in the prompt) is a follow-up — the CLI backend is the real repo-aware path.
 
 ## Problem
 

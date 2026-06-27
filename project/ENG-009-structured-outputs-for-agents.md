@@ -1,10 +1,19 @@
 # ENG-009 — Use structured outputs for agent response parsing
 
-- **Status:** backlog
+- **Status:** done
 - **Priority:** P1 (High)
 - **Stage:** implementation
 - **Assignee role:** staff_engineer
 - **Area:** packages/agents
+
+> **Outcome (Wave 1):** `WorkerInput` gained an optional `outputSchema`; the **API backend** now emits
+> `output_config: { format: { type: "json_schema", schema } }` (SDK 0.105) so responses are
+> schema-constrained JSON. Hand-written JSON Schemas (`schemas.ts`: `PROPOSAL_SCHEMA` / `TICKETS_SCHEMA`
+> / `VERDICT_SCHEMA`, within the API's structured-output constraints) are passed by
+> `proposeFileChanges` / `proposeTickets` / `assess`. The **CLI backend** ignores the schema and keeps
+> the prose-parse fallback. `ProposedChanges.parsed` distinguishes a parse failure from an empty change
+> set, and `implementTicket` now audits "agent output could not be parsed" vs "no file changes
+> proposed". Typecheck green; schema unit tests added; 35 agents+server tests pass.
 
 ## Problem
 

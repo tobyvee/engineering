@@ -104,12 +104,15 @@ export const budgets = pgTable("budgets", {
   scope: text("scope").notNull(), // a role id, or "unit"
   limitCents: integer("limit_cents").notNull(),
   spentCents: integer("spent_cents").notNull().default(0),
+  // Start of the current budget window; spend resets when the calendar month rolls over (ENG-007).
+  periodStart: timestamp("period_start", { withTimezone: true }).notNull().defaultNow(),
 })
 
 export const approvals = pgTable("approvals", {
   id: uuid("id").primaryKey().defaultRandom(),
   kind: approvalKind("kind").notNull(),
   ticketId: uuid("ticket_id").references(() => tickets.id),
+  epicId: uuid("epic_id").references(() => epics.id),
   requestedByRole: roleId("requested_by_role").notNull(),
   status: approvalStatus("status").notNull().default("pending"),
   decidedBy: text("decided_by"),
