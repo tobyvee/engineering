@@ -383,12 +383,15 @@ export async function implementTicket(
     return null
   }
   if (!proposed || proposed.files.length === 0) {
-    // Distinguish a genuine empty change set from a parse failure (ENG-009).
+    // Distinguish a genuine empty change set from a parse failure, and an output that was cut off at
+    // the token cap (incomplete JSON) from one the model never produced as JSON at all (ENG-009).
     const reason = !proposed
       ? "agent runtime unavailable"
-      : proposed.parsed
-        ? "no file changes proposed"
-        : "agent output could not be parsed"
+      : proposed.stoppedReason === "truncated"
+        ? "agent output truncated (hit token cap)"
+        : proposed.parsed
+          ? "no file changes proposed"
+          : "agent output could not be parsed"
     await persistence.audit.append({
       actor: "system",
       kind: "delivery_skipped",

@@ -37,7 +37,13 @@ export interface ToolCallRecord {
   at: string
 }
 
-export type StoppedReason = "completed" | "budget_exhausted" | "needs_approval" | "blocked"
+export type StoppedReason =
+  | "completed"
+  | "budget_exhausted"
+  | "needs_approval"
+  | "blocked"
+  /** Output hit the token cap and was cut off — any JSON is incomplete (do not trust `summary`). */
+  | "truncated"
 
 export interface WorkerResult {
   summary: string
