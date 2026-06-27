@@ -2,9 +2,9 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-> **Status: the full product-development lifecycle is implemented and the delivery roadmap (Waves 0–3,
-> all 16 backlog tickets in `project/`) is complete — one real `ANTHROPIC_API_KEY` away from a live
-> autonomous run.** The pnpm + Turborepo monorepo passes `typecheck`/`lint`/`test` (94) + `build`,
+> **Status: the full product-development lifecycle is implemented and Waves 0–3 of the delivery
+> roadmap (14 of the 16 backlog tickets in `project/`) are complete — Wave 4 (provenance + Kappa
+> consensus) remains; it's one real `ANTHROPIC_API_KEY` away from a live autonomous run.** The pnpm + Turborepo monorepo passes `typecheck`/`lint`/`test` (94) + `build`,
 > enforced by **CI** (`.github/workflows/ci.yml`) on every PR. The whole lifecycle runs as durable
 > Temporal workflows against Postgres, with **all seven roles driving a stage** behind **three human
 > approval gates** (roadmap · merge · deploy):

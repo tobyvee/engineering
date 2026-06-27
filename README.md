@@ -10,7 +10,7 @@
 
 The reference point is [Paperclip](https://paperclipai.net/) (a control plane that runs whole companies as org charts of AI agents). This project deliberately **narrows the scope to one unit and goes deeper into the product-development lifecycle and actual delivery**: discovery → design → architecture → implementation → review → ship. You set the mission and goals, govern budgets, and approve at the gates; the agents do the work.
 
-> **Status:** the full lifecycle is implemented and the delivery roadmap (Waves 0–3, all 16 tickets in [`project/`](./project)) is complete — it runs as durable Temporal workflows against Postgres, with all seven roles driving a stage behind three human gates. `typecheck` · `lint` · `test` (94) · `build` are green and CI-gated on every PR. Agent steps no-op (audited) without credentials, so a real autonomous run needs an `ANTHROPIC_API_KEY` (or the `claude` CLI). It's a working system built as a focused exploration, not a hosted product.
+> **Status:** the full lifecycle is implemented and Waves 0–3 of the delivery roadmap (14 of the 16 tickets in [`project/`](./project)) are complete — Wave 4 (provenance + consensus) remains. It runs as durable Temporal workflows against Postgres, with all seven roles driving a stage behind three human gates. `typecheck` · `lint` · `test` (94) · `build` are green and CI-gated on every PR. Agent steps no-op (audited) without credentials, so a real autonomous run needs an `ANTHROPIC_API_KEY` (or the `claude` CLI). It's a working system built as a focused exploration, not a hosted product.
 
 ## The pipeline
 

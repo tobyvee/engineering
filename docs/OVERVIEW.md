@@ -139,7 +139,8 @@ human approval gates (roadmap · merge · deploy). Every stage is a role agent (
 
 ## Roadmap delivered (Waves 0–3 · `project/`)
 
-All 16 backlog tickets are merged to `main` (see `project/ROADMAP.md` for the dependency-sequenced plan):
+Waves 0–3 (**14 of the 16** backlog tickets) are merged to `main`; **Wave 4** (provenance + consensus)
+remains (see `project/ROADMAP.md` for the dependency-sequenced plan):
 
 - **Wave 0 — foundations:** ENG-003 CI · ENG-002 Temporal workflow tests · ENG-011/012/015 decisions
   (GitHub Issues default · A2A monitor-only · SurrealDB no-go).
@@ -149,6 +150,8 @@ All 16 backlog tickets are merged to `main` (see `project/ROADMAP.md` for the de
   repo-aware coding agents.
 - **Wave 3 — governance / observability:** ENG-007 budget reset + reservation · ENG-006 first-class
   approvals · ENG-010 budget dashboard · ENG-008 cyclic rework.
+- **Wave 4 — provenance + consensus (remaining):** ENG-014 decision log / provenance tree · ENG-016
+  Kappa-style consensus (PRD-001).
 
 ## Not yet built (honest gaps)
 
