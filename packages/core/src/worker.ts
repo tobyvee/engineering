@@ -22,6 +22,12 @@ export interface WorkerInput {
    * backend) ignore it and fall back to prompt-contract parsing.
    */
   outputSchema?: Record<string, unknown>
+  /**
+   * Optional working directory for the run (ENG-001). When set (e.g. a cloned target repo in the
+   * working-code workspace), the CLI backend runs the agent there — so it reads and edits real source
+   * — and does NOT clean it up. When unset, the backend uses a throwaway agent-state sandbox.
+   */
+  workdir?: string
 }
 
 export interface ToolCallRecord {

@@ -66,8 +66,16 @@ const SANDBOX_ENV_ALLOWLIST = [
  * Build the scrubbed environment for a sandboxed agent run: the allow-list above, plus any names
  * explicitly opted in via `AGENT_SANDBOX_ENV_PASSTHROUGH` (comma-separated). Everything else — notably
  * credentials — is withheld. Pure and side-effect-free for testability.
+ *
+ * Scoped-token exception (ENG-013): the PM role provisions repos with `git`/`gh`, so — and only for
+ * the PM — a dedicated `AGENT_PM_GITHUB_TOKEN` is forwarded as `GITHUB_TOKEN`/`GH_TOKEN`. This is a
+ * deliberately narrow widening of the ENG-005 boundary: no other role's sandbox receives git/gh
+ * credentials, and the host's full `GITHUB_TOKEN` is never forwarded.
  */
-export function sandboxEnv(source: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+export function sandboxEnv(
+  source: NodeJS.ProcessEnv = process.env,
+  role?: string,
+): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {}
   for (const key of SANDBOX_ENV_ALLOWLIST) {
     const value = source[key]
@@ -82,6 +90,10 @@ export function sandboxEnv(source: NodeJS.ProcessEnv = process.env): NodeJS.Proc
       const value = source[key]
       if (value !== undefined) env[key] = value
     }
+  }
+  if (role === "pm" && source.AGENT_PM_GITHUB_TOKEN) {
+    env.GITHUB_TOKEN = source.AGENT_PM_GITHUB_TOKEN
+    env.GH_TOKEN = source.AGENT_PM_GITHUB_TOKEN
   }
   return env
 }
@@ -120,13 +132,19 @@ export class CliBackend implements WorkerBackend {
       buildSystemPrompt(input),
     ]
 
-    // Confine the agent's file/bash tools to a throwaway sandbox — never the repo source.
-    const sandbox = await createSandbox(this.workspaceRoot, input.role)
+    // ENG-001: when a workdir is provided (a cloned target repo in the working-code workspace) run
+    // there so the agent reads/edits real source; otherwise confine it to a throwaway agent-state
+    // sandbox — never this product's own source. Provided workdirs are persistent — don't clean up.
+    const useProvided = Boolean(input.workdir)
+    const cwd = input.workdir ?? (await createSandbox(this.workspaceRoot, input.role))
+    const env = sandboxEnv(process.env, input.role)
     let stdout: string
     try {
-      stdout = await this.exec(args, input.task, sandbox, signal)
+      stdout = await this.exec(args, input.task, cwd, env, signal)
     } finally {
-      if (!process.env.AGENT_KEEP_WORKSPACE) await rm(sandbox, { recursive: true, force: true })
+      if (!useProvided && !process.env.AGENT_KEEP_WORKSPACE) {
+        await rm(cwd, { recursive: true, force: true })
+      }
     }
 
     let parsed: CliResult | undefined
@@ -154,10 +172,16 @@ export class CliBackend implements WorkerBackend {
     }
   }
 
-  private exec(args: string[], stdin: string, cwd: string, signal?: AbortSignal): Promise<string> {
+  private exec(
+    args: string[],
+    stdin: string,
+    cwd: string,
+    env: NodeJS.ProcessEnv,
+    signal?: AbortSignal,
+  ): Promise<string> {
     return new Promise((resolve, reject) => {
-      // Scrubbed env (ENG-005): the agent's tools never see host secrets.
-      const child = spawn(this.bin, args, { cwd, signal, env: sandboxEnv() })
+      // Scrubbed env (ENG-005); the PM also gets a scoped git/gh token (ENG-013). See sandboxEnv.
+      const child = spawn(this.bin, args, { cwd, signal, env })
       let stdout = ""
       let stderr = ""
       child.stdout.on("data", (chunk) => {

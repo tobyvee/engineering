@@ -1,12 +1,33 @@
 # ENG-013 — Repository provisioning via the PM agent (git + gh) & shared workspace
 
-- **Status:** backlog
+- **Status:** done
 - **Priority:** P0 (Critical — prerequisite for ENG-001)
 - **Stage:** discovery → implementation
 - **Assignee role:** pm (owns repo create / list / clone); supporting backend work (per-role tool
   gating, scoped auth) by staff_engineer with lead_system_design input
 - **Area:** packages/core (role config) · packages/agents (CLI backend tool gating + auth) ·
   apps/server (shared workspace + audit)
+
+> **Outcome (Wave 2):**
+> - **Two-root workspace** — `packages/agents/src/workspace.ts` (`resolveCodeWorkspaceRoot` /
+>   `repoWorkspacePath`): a *persistent* working-code root (`workspace/` singular, env
+>   `AGENT_CODE_WORKSPACE`) for cloned target repos, distinct from the throwaway `workspaces/`
+>   agent-state sandboxes. `/workspace/` gitignored.
+> - **PM tool grant** — `ROLES.pm.tools` now includes `git` + `gh`, and the PM prompt covers
+>   list/reuse/create/clone (idempotent).
+> - **Scoped-token enforcement** — `sandboxEnv(source, role)` forwards `AGENT_PM_GITHUB_TOKEN` as
+>   `GITHUB_TOKEN`/`GH_TOKEN` **only** to the PM sandbox; the host `GITHUB_TOKEN` is never forwarded to
+>   any agent. This is the real security boundary (only the PM can authenticate git/gh).
+> - **Idempotent provisioning** — `provision.ts` (`repoTargetFromEnv` / `provisionAction` / `gitArgs` /
+>   `ensureRepoCloned`): shallow clone-or-ff-pull into the working-code workspace, token passed via
+>   `http.extraheader` (never written to `.git/config`); no-op when GitHub unconfigured. Wired into
+>   `implementTicket` with `repo_context_ready` / `repo_context_skipped` audit events.
+> - Tests: workspace layout, provisioning (skip/action/args), PM-scoped token.
+>
+> *Deferred (noted):* (1) literal `claude --allowedTools` tool-name gating — the security boundary is
+> enforced via the scoped token, so the abstract→Claude-Code tool-name mapping is a follow-up; (2)
+> per-epic repo *association* — the target repo is the configured `GITHUB_OWNER`/`GITHUB_REPO` (same as
+> delivery) for now; moving repo selection onto the Goal/Epic is a follow-up.
 
 ## Decision
 

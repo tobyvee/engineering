@@ -1,4 +1,4 @@
-import { assess, draft, proposeFileChanges, proposeTickets } from "@eng/agents"
+import { assess, draft, ensureRepoCloned, proposeFileChanges, proposeTickets } from "@eng/agents"
 import {
   type DeliveryAdapter,
   type DeployState,
@@ -213,6 +213,36 @@ export async function implementTicket(ticketId: string): Promise<PullRequestRef 
   // Central budget enforcement (invariant #3): remaining = limit − spent from the budgets table.
   const remaining = (await getBudgetRemaining(role.id)) ?? role.monthlyBudgetCents
 
+  // ENG-013/ENG-001: ensure the target repo is cloned into the working-code workspace (idempotent),
+  // then point the coding agent at it so it reads/edits real source. No-op (audited) without GitHub.
+  let workdir: string | undefined
+  try {
+    const clone = await ensureRepoCloned()
+    if (clone) {
+      workdir = clone.path
+      await persistence.audit.append({
+        actor: "staff_engineer",
+        kind: "repo_context_ready",
+        ticketId,
+        payload: { path: clone.path, action: clone.action },
+      })
+    } else {
+      await persistence.audit.append({
+        actor: "system",
+        kind: "repo_context_skipped",
+        ticketId,
+        payload: { reason: "GitHub not configured" },
+      })
+    }
+  } catch (err) {
+    await persistence.audit.append({
+      actor: "system",
+      kind: "repo_context_skipped",
+      ticketId,
+      payload: { error: String(err) },
+    })
+  }
+
   let proposed: Awaited<ReturnType<typeof proposeFileChanges>> | null = null
   try {
     proposed = await proposeFileChanges({
@@ -223,6 +253,7 @@ export async function implementTicket(ticketId: string): Promise<PullRequestRef 
         ? `Implement ticket "${ticket.title}": ${ticket.description || "(no description provided)"}.`
         : `Implement ticket ${ticketId}.`,
       budgetCentsRemaining: remaining,
+      workdir,
     })
     await addSpend(role.id, proposed.costCents)
     await persistence.audit.append({

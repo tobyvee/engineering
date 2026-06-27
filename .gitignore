@@ -11,3 +11,6 @@ coverage/
 # cli-backend agent sandboxes — runtime scratch only (keep the dir + its README)
 /workspaces/*
 !/workspaces/README.md
+
+# working-code workspace — cloned target repos agents inspect/modify (ENG-013); never committed
+/workspace/

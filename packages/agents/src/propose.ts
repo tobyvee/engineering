@@ -9,6 +9,8 @@ export interface ProposeChangesInput {
   /** What to build. */
   task: string
   budgetCentsRemaining: number
+  /** Cloned target repo to work in (ENG-001) — the agent reads/edits real source there. */
+  workdir?: string
 }
 
 export interface ProposedChanges {
@@ -39,6 +41,7 @@ export async function proposeFileChanges(input: ProposeChangesInput): Promise<Pr
     task: `${input.task}\n\n${CONTRACT}`,
     budgetCentsRemaining: input.budgetCentsRemaining,
     outputSchema: PROPOSAL_SCHEMA,
+    workdir: input.workdir,
   })
   const { summary, files } = parseProposal(result.summary)
   return {

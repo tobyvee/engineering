@@ -33,9 +33,12 @@ high-leverage enablers forward even when labelled P1/P2.
   parse-failure vs empty-set audited distinctly).
 - **ENG-005** ✅ — Scrub the CLI sandbox env (allow-listed `sandboxEnv()`; host secrets withheld).
 
-### Wave 2 — Repo-context critical path
-- **ENG-013** — Repo provisioning (PM `git`/`gh`) + two-root workspace. Needs ENG-005.
-- **ENG-001** — Repo-aware coding agents. Needs ENG-013; benefits from ENG-009.
+### Wave 2 — Repo-context critical path — ✅ complete (2026-06-27)
+- **ENG-013** ✅ — Two-root workspace + PM `git`/`gh` grant + PM-scoped token + idempotent
+  `ensureRepoCloned`, wired+audited in `implementTicket`. (Deferred: literal `--allowedTools` gating;
+  per-epic repo association.)
+- **ENG-001** ✅ — `WorkerInput.workdir`; CLI backend runs in the cloned repo cwd so agents read/edit
+  real source. (Deferred: API-backend file-context injection.)
 
 ### Wave 3 — Governance / observability
 - **ENG-007** — Budget model (reset + reservation). Do first in this wave — gates 010 and 008.
