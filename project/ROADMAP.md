@@ -48,10 +48,12 @@ high-leverage enablers forward even when labelled P1/P2.
 - **ENG-010** ✅ — `/api/budgets` + web Budgets page (per-role limit/spent/remaining + total).
 - **ENG-008** ✅ — Bounded implement→review→QA rework loop with QA feedback, then blocked.
 
-### Wave 4 — Provenance + consensus
-- **ENG-014** — Decision log / provenance tree. Needs ENG-009; build on the Postgres+KB default behind
-  its port (see flag 3) rather than waiting on a SurrealDB migration.
-- **ENG-016** — Kappa-style consensus (PRD-001). Needs ENG-009 + ENG-002; soft-needs ENG-014.
+### Wave 4 — Provenance + consensus ✅
+- **ENG-014** ✅ — Decision log / provenance DAG on the Postgres+KB hybrid behind a `DecisionLog` port;
+  every agent step (shape/decompose/implement/QA) emits a decision traceable to the originating request.
+- **ENG-016** ✅ — Kappa-style consensus (PRD-001), Phase 1: advisory `directionConsensus` workflow —
+  candidate generation → parallel independent raters → Krippendorff/Fleiss/Kendall agreement + Borda →
+  human-escalation tie-break via the `architecture_decision` gate; outcomes feed the decision log.
 
 ## Critical path (to a safe, useful autonomous run)
 

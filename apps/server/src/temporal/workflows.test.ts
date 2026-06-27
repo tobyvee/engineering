@@ -4,6 +4,8 @@ import { bundleWorkflowCode, Worker, type WorkflowBundle } from "@temporalio/wor
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest"
 import {
   approveSignal,
+  architectureSignal,
+  directionConsensus,
   epicDecomposition,
   epicShaping,
   heartbeat,
@@ -56,6 +58,34 @@ function makeActivities(overrides: Record<string, unknown> = {}) {
     requestRoadmapSignoff: vi.fn(async (_epicId: string) => {}),
     recordRoadmapApproval: vi.fn(async (_epicId: string) => {}),
     requestApproval: vi.fn(async (_kind: string, _ticketId: string) => {}),
+    // Consensus (ENG-016): two candidates, three raters, a clear non-advisory winner by default.
+    generateDirections: vi.fn(async (_epicId: string) => ({
+      candidates: [
+        { id: "c1", title: "A", summary: "", tradeoffs: [] },
+        { id: "c2", title: "B", summary: "", tradeoffs: [] },
+      ],
+      config: {
+        inputMode: "rank",
+        threshold: 0.6,
+        tieBreaker: "human",
+        criteria: [],
+        raterRoles: ["lead_system_design", "lead_architect", "lead_engineer"],
+        advisory: false,
+      },
+    })),
+    rateDirection: vi.fn(async (_e: string, _c: unknown, role: string, _m: string) => ({
+      raterRole: role,
+      pick: null,
+      ranking: ["c1", "c2"],
+      rationale: "",
+      costCents: 0,
+    })),
+    decideConsensus: vi.fn(async (_e: string, _c: unknown, _r: unknown) => ({
+      consensusReached: true,
+      winner: "c1",
+    })),
+    requestArchitectureApproval: vi.fn(async (_epicId: string) => {}),
+    recordArchitectureApproval: vi.fn(async (_epicId: string) => {}),
     ...overrides,
   }
 }
@@ -232,6 +262,97 @@ describe("epicShaping", () => {
     expect(acts.runShapingStage.mock.calls.length).toBeGreaterThanOrEqual(4)
     expect(acts.runShapingStage).toHaveBeenCalledWith("e1", "discovery")
     expect(acts.runShapingStage).toHaveBeenCalledWith("e1", "system_design")
+  }, 30_000)
+})
+
+describe("directionConsensus", () => {
+  it("runs the raters in parallel and adopts a clear winner without a tie-break gate", async () => {
+    const acts = makeActivities()
+    await withWorker(acts, async () => {
+      await env.client.workflow.execute(directionConsensus, {
+        taskQueue: TQ,
+        workflowId: nextId("consensus"),
+        args: ["e1"],
+      })
+    })
+    expect(acts.generateDirections).toHaveBeenCalledWith("e1")
+    expect(acts.rateDirection).toHaveBeenCalledTimes(3) // one per rater role, in parallel
+    expect(acts.decideConsensus).toHaveBeenCalledTimes(1)
+    expect(acts.requestArchitectureApproval).not.toHaveBeenCalled() // consensus reached → no gate
+  }, 30_000)
+
+  it("escalates to the architecture gate on low consensus, then resolves on sign-off", async () => {
+    const acts = makeActivities({
+      decideConsensus: vi.fn(async () => ({ consensusReached: false, winner: null })),
+    })
+    await withWorker(acts, async () => {
+      const handle = await env.client.workflow.start(directionConsensus, {
+        taskQueue: TQ,
+        workflowId: nextId("consensus"),
+        args: ["e1"],
+      })
+      await env.sleep("1 day")
+      expect(acts.requestArchitectureApproval).toHaveBeenCalledWith("e1")
+      expect(acts.recordArchitectureApproval).not.toHaveBeenCalled() // still blocked
+
+      await handle.signal(architectureSignal)
+      await handle.result()
+    })
+    expect(acts.recordArchitectureApproval).toHaveBeenCalledWith("e1")
+  }, 30_000)
+
+  it("is advisory: records the round but never blocks even when consensus is not reached", async () => {
+    const acts = makeActivities({
+      generateDirections: vi.fn(async () => ({
+        candidates: [
+          { id: "c1", title: "A", summary: "", tradeoffs: [] },
+          { id: "c2", title: "B", summary: "", tradeoffs: [] },
+        ],
+        config: {
+          inputMode: "rank",
+          threshold: 0.6,
+          tieBreaker: "human",
+          criteria: [],
+          raterRoles: ["lead_system_design", "lead_architect", "lead_engineer"],
+          advisory: true,
+        },
+      })),
+      decideConsensus: vi.fn(async () => ({ consensusReached: false, winner: null })),
+    })
+    await withWorker(acts, async () => {
+      await env.client.workflow.execute(directionConsensus, {
+        taskQueue: TQ,
+        workflowId: nextId("consensus"),
+        args: ["e1"],
+      })
+    })
+    expect(acts.decideConsensus).toHaveBeenCalledTimes(1)
+    expect(acts.requestArchitectureApproval).not.toHaveBeenCalled() // advisory → never gates
+  }, 30_000)
+
+  it("no-ops when fewer than two viable candidates are generated", async () => {
+    const acts = makeActivities({
+      generateDirections: vi.fn(async () => ({
+        candidates: [{ id: "c1", title: "A", summary: "", tradeoffs: [] }],
+        config: {
+          inputMode: "rank",
+          threshold: 0.6,
+          tieBreaker: "human",
+          criteria: [],
+          raterRoles: ["lead_system_design", "lead_architect", "lead_engineer"],
+          advisory: false,
+        },
+      })),
+    })
+    await withWorker(acts, async () => {
+      await env.client.workflow.execute(directionConsensus, {
+        taskQueue: TQ,
+        workflowId: nextId("consensus"),
+        args: ["e1"],
+      })
+    })
+    expect(acts.rateDirection).not.toHaveBeenCalled()
+    expect(acts.decideConsensus).not.toHaveBeenCalled()
   }, 30_000)
 })
 

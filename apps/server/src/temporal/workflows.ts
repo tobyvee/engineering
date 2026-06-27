@@ -17,6 +17,11 @@ const {
   requestRoadmapSignoff,
   recordRoadmapApproval,
   requestApproval,
+  generateDirections,
+  rateDirection,
+  decideConsensus,
+  requestArchitectureApproval,
+  recordArchitectureApproval,
 } = proxyActivities<typeof activities>({
   startToCloseTimeout: "10 minutes",
   retry: { maximumAttempts: 3 },
@@ -57,6 +62,43 @@ export async function epicDecomposition(epicId: string): Promise<void> {
   await condition(() => approved)
   await recordRoadmapApproval(epicId)
   await decomposeEpic(epicId)
+}
+
+/** Architecture sign-off gate (ENG-016 tie-breaker): released by the human when consensus is low. */
+export const architectureSignal = defineSignal("architectureApprove")
+
+/**
+ * Kappa-style consensus over candidate implementation directions (ENG-016 / PRD-001). A durable step:
+ * the Lead System Design agent enumerates 2–4 candidates, then the senior technical roles rate them
+ * **independently and in parallel** (the barrier is what makes the agreement coefficient meaningful);
+ * the agreement coefficient gates whether the aggregate winner is adopted or sent to the tie-breaker.
+ *
+ * Phase 1 is **advisory** (record the round + score, don't block); when promoted to a real gate
+ * (`CONSENSUS_ADVISORY=false`) a low-agreement outcome escalates to the human via the
+ * `architecture_decision` approval gate (invariant #4). No-op when <2 viable candidates exist.
+ */
+export async function directionConsensus(epicId: string): Promise<void> {
+  let approved = false
+  setHandler(architectureSignal, () => {
+    approved = true
+  })
+
+  const kickoff = await generateDirections(epicId)
+  if (!kickoff || kickoff.candidates.length < 2) return // not enough viable options → shaping proceeds
+  const { candidates, config } = kickoff
+
+  // Independent raters, concurrently (barrier): collect every rating before measuring agreement.
+  const ratings = await Promise.all(
+    config.raterRoles.map((role) => rateDirection(epicId, candidates, role, config.inputMode)),
+  )
+
+  const { consensusReached } = await decideConsensus(epicId, candidates, ratings)
+  if (config.advisory || consensusReached) return // advisory (record-only), or a trusted winner
+
+  // Tie-break: escalate to the human architecture_decision gate and block until signed off.
+  await requestArchitectureApproval(epicId)
+  await condition(() => approved)
+  await recordArchitectureApproval(epicId)
 }
 
 /**

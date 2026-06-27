@@ -1,6 +1,6 @@
 # ENG-016 — Implement Kappa-style consensus (PRD-001)
 
-- **Status:** backlog
+- **Status:** done (Phase 1 — advisory; ranked Borda + Krippendorff/Kendall/Fleiss; human-escalation tie-break)
 - **Priority:** P2 (Medium — feature; not a live-run blocker)
 - **Stage:** implementation
 - **Assignee role:** staff_engineer (schema + agreement function design with lead_system_design;
