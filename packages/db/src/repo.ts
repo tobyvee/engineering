@@ -2,17 +2,31 @@ import {
   type Approval,
   type ApprovalKind,
   type AuditEvent,
+  type Decision,
   type NewAuditEvent,
+  type NewDecision,
   type NewTicket,
   periodExpired,
   ROLES,
   type RoleId,
   type Ticket,
   type TicketStatus,
+  traceToRoot,
+  type WorkItemRef,
 } from "@eng/core"
 import { and, desc, eq, sql } from "drizzle-orm"
 import { db } from "./client"
-import { approvals, auditLog, budgets, epics, goals, missions, tickets, units } from "./schema"
+import {
+  approvals,
+  auditLog,
+  budgets,
+  decisions,
+  epics,
+  goals,
+  missions,
+  tickets,
+  units,
+} from "./schema"
 
 function firstOrThrow<T>(rows: T[], what: string): T {
   const row = rows[0]
@@ -438,4 +452,103 @@ export async function listBudgets(): Promise<BudgetSummary[]> {
     .from(budgets)
     .orderBy(budgets.scope)
   return rows.map((r) => ({ ...r, remainingCents: Math.max(0, r.limitCents - r.spentCents) }))
+}
+
+// --- Decision provenance graph (ENG-014) -------------------------------------
+
+function toDecision(row: typeof decisions.$inferSelect): Decision {
+  return {
+    id: row.id,
+    rootRequestId: row.rootRequestId,
+    parentDecisionIds: row.parentDecisionIds,
+    missionId: row.missionId,
+    goalId: row.goalId,
+    epicId: row.epicId,
+    ticketId: row.ticketId,
+    actor: row.actor as Decision["actor"],
+    stage: row.stage,
+    statement: row.statement,
+    rationale: row.rationale,
+    alternatives: row.alternatives,
+    inputs: row.inputs,
+    outputs: row.outputs,
+    confidence: row.confidence,
+    costCents: row.costCents,
+    auditEventId: row.auditEventId,
+    at: row.at.toISOString(),
+  }
+}
+
+/** Append a decision node (append-only, invariant #2). */
+export async function recordDecision(input: NewDecision): Promise<Decision> {
+  const row = firstOrThrow(
+    await db
+      .insert(decisions)
+      .values({
+        rootRequestId: input.rootRequestId,
+        parentDecisionIds: input.parentDecisionIds,
+        missionId: input.missionId,
+        goalId: input.goalId,
+        epicId: input.epicId,
+        ticketId: input.ticketId,
+        actor: input.actor,
+        stage: input.stage,
+        statement: input.statement,
+        rationale: input.rationale,
+        alternatives: input.alternatives,
+        inputs: input.inputs,
+        outputs: input.outputs,
+        confidence: input.confidence,
+        costCents: input.costCents,
+        auditEventId: input.auditEventId,
+      })
+      .returning(),
+    "decision",
+  )
+  return toDecision(row)
+}
+
+export async function getDecision(id: string): Promise<Decision | null> {
+  const row = (await db.select().from(decisions).where(eq(decisions.id, id)).limit(1))[0]
+  return row ? toDecision(row) : null
+}
+
+/** All decisions in a trace (same root request), newest first. */
+export async function listDecisionsByRoot(rootRequestId: string): Promise<Decision[]> {
+  const rows = await db
+    .select()
+    .from(decisions)
+    .where(eq(decisions.rootRequestId, rootRequestId))
+    .orderBy(desc(decisions.at))
+  return rows.map(toDecision)
+}
+
+/** Decisions attached to a work item (ANDs the provided refs); empty when no ref is given. */
+export async function listDecisionsByWorkItem(ref: WorkItemRef): Promise<Decision[]> {
+  const conds = []
+  if (ref.ticketId) conds.push(eq(decisions.ticketId, ref.ticketId))
+  if (ref.epicId) conds.push(eq(decisions.epicId, ref.epicId))
+  if (ref.goalId) conds.push(eq(decisions.goalId, ref.goalId))
+  if (ref.missionId) conds.push(eq(decisions.missionId, ref.missionId))
+  if (conds.length === 0) return []
+  const rows = await db
+    .select()
+    .from(decisions)
+    .where(and(...conds))
+    .orderBy(desc(decisions.at))
+  return rows.map(toDecision)
+}
+
+/**
+ * Walk parent edges up to the root request — the provenance chain. Loads the trace (one query by
+ * root) and runs the shared pure BFS (`traceToRoot`); the per-trace decision count is small, so this
+ * is simpler and cheaper than a recursive CTE over the jsonb edge set.
+ */
+export async function traverseDecisionToRoot(id: string): Promise<Decision[]> {
+  const start = await getDecision(id)
+  if (!start) return []
+  const all = await listDecisionsByRoot(start.rootRequestId)
+  const byId = new Map(all.map((d) => [d.id, d]))
+  byId.set(start.id, start) // ensure the start node is present regardless of ordering
+  return traceToRoot(id, byId)
 }

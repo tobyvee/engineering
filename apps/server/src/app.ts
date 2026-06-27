@@ -35,6 +35,29 @@ app.get("/api/approvals", async (c) => c.json({ approvals: await listPendingAppr
 // Per-role budget/cost view for the dashboard (ENG-010).
 app.get("/api/budgets", async (c) => c.json({ budgets: await listBudgets() }))
 
+// Decision-provenance graph (ENG-014): read views over the decision DAG. Query by `root` (the epic
+// id / trace id) or by work item (`ticketId`/`epicId`/`goalId`/`missionId`).
+app.get("/api/decisions", async (c) => {
+  const root = c.req.query("root")
+  if (root) return c.json({ decisions: await persistence.decisions.listByRoot(root) })
+  const ref = {
+    ticketId: c.req.query("ticketId"),
+    epicId: c.req.query("epicId"),
+    goalId: c.req.query("goalId"),
+    missionId: c.req.query("missionId"),
+  }
+  return c.json({ decisions: await persistence.decisions.byWorkItem(ref) })
+})
+app.get("/api/decisions/:id", async (c) => {
+  const decision = await persistence.decisions.get(c.req.param("id"))
+  return decision ? c.json({ decision }) : c.json({ error: "not found" }, 404)
+})
+// Provenance chain: walk parent edges from a decision up to the originating request (the root).
+app.get("/api/decisions/:id/trace", async (c) => {
+  const trace = await persistence.decisions.traverseToRoot(c.req.param("id"))
+  return c.json({ trace })
+})
+
 // Goal hierarchy authoring (through the persistence port, so the backend is swappable). Lets the
 // human/PM decompose work under multiple goals + epics; tickets then target a chosen epic.
 app.get("/api/goals", async (c) => c.json({ goals: await persistence.hierarchy.listGoals() }))

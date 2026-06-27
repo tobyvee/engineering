@@ -1,6 +1,6 @@
 # ENG-014 — Per-agent decision logs & a traceable decision tree
 
-- **Status:** backlog
+- **Status:** done
 - **Priority:** P2 (Medium — governance / explainability)
 - **Stage:** architecture → implementation
 - **Assignee role:** lead_system_design (schema + storage port) with lead_architect sign-off

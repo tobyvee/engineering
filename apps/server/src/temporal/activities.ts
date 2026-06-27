@@ -23,6 +23,7 @@ import {
 import { persistenceFromEnv } from "../persistence"
 import { artifactPath, SHAPING_STAGES } from "../shaping"
 import { startTicketLifecycle } from "./client"
+import { recordStepDecision, SHAPING_STAGE_TO_LIFECYCLE } from "./provenance"
 
 /**
  * Activities are the side-effecting steps the durable workflow calls. They run in the normal Node
@@ -96,11 +97,25 @@ export async function runShapingStage(epicId: string, stageKey: string): Promise
       artifactPath(epicId, stageKey),
       `# ${stage.title}\n\n${result.content}\n`,
     )
-    await persistence.audit.append({
+    const event = await persistence.audit.append({
       actor: role.id,
       kind: "artifact_drafted",
       ticketId: null,
       payload: { epicId, stage: stageKey, costCents: result.costCents },
+    })
+    // Decision provenance (ENG-014): the shaping handoff chain, linked stage-to-stage to the root.
+    await recordStepDecision({
+      epicId,
+      actor: role.id,
+      stage: SHAPING_STAGE_TO_LIFECYCLE[stageKey] ?? "discovery",
+      statement: `${stage.title}: drafted the ${stageKey} artifact`,
+      rationale: result.content.slice(0, 600),
+      inputs: prior.length
+        ? SHAPING_STAGES.slice(0, prior.length).map((s) => artifactPath(epicId, s.key))
+        : [],
+      outputs: [artifactPath(epicId, stageKey)],
+      costCents: result.costCents,
+      auditEventId: event.id,
     })
   } catch (err) {
     await reconcileSpend(role.id, held, 0) // release the hold
@@ -209,11 +224,24 @@ export async function decomposeEpic(epicId: string): Promise<string[]> {
       payload: { epicId, assigneeRole: t.assigneeRole, criteria: t.acceptanceCriteria.length },
     })
   }
-  await persistence.audit.append({
+  const decomposedEvent = await persistence.audit.append({
     actor: "lead_engineer",
     kind: "epic_decomposed",
     ticketId: null,
     payload: { epicId, tickets: created.length, costCents: proposed.costCents },
+  })
+  // Decision provenance (ENG-014): the decomposition decision — parents the shaping handoff, outputs
+  // the created tickets (each ticket's implement/QA decisions chain from here).
+  await recordStepDecision({
+    epicId,
+    actor: "lead_engineer",
+    stage: "implementation",
+    statement: `Decomposed the epic into ${created.length} ticket(s)`,
+    rationale: proposed.tickets.map((t) => `• ${t.title}`).join("\n"),
+    inputs: artifacts.map((_, i) => artifactPath(epicId, SHAPING_STAGES[i]?.key ?? `stage-${i}`)),
+    outputs: created.map((id) => `ticket:${id}`),
+    costCents: proposed.costCents,
+    auditEventId: decomposedEvent.id,
   })
   return created
 }
@@ -331,7 +359,7 @@ export async function implementTicket(
       workdir,
     })
     await reconcileSpend(role.id, held, proposed.costCents)
-    await persistence.audit.append({
+    const implEvent = await persistence.audit.append({
       actor: "staff_engineer",
       kind: "agent_step",
       ticketId,
@@ -343,6 +371,24 @@ export async function implementTicket(
         files: proposed.files.length,
       },
     })
+    // Decision provenance (ENG-014): the implementation decision for the ticket, chained from the
+    // decomposition (or the prior QA verdict on a rework attempt).
+    if (ticket) {
+      await recordStepDecision({
+        epicId: ticket.epicId,
+        ticketId,
+        actor: "staff_engineer",
+        stage: "implementation",
+        statement: feedback
+          ? `Re-implemented "${title}" addressing QA feedback`
+          : `Implemented "${title}"`,
+        rationale: proposed.summary,
+        inputs: feedback ? [`qa-feedback: ${feedback}`] : [],
+        outputs: proposed.files.map((f) => f.path),
+        costCents: proposed.costCents,
+        auditEventId: implEvent.id,
+      })
+    }
   } catch (err) {
     await reconcileSpend(role.id, held, 0) // release the hold
     await persistence.audit.append({
@@ -480,12 +526,28 @@ export async function verifyTicket(
       budgetCentsRemaining: remaining,
     })
     await reconcileSpend(role.id, held, verdict.costCents)
-    await persistence.audit.append({
+    const verdictEvent = await persistence.audit.append({
       actor: "qa_test",
       kind: verdict.passed ? "qa_passed" : "qa_failed",
       ticketId,
       payload: { summary: verdict.summary, costCents: verdict.costCents },
     })
+    // Decision provenance (ENG-014): the QA verdict, chained from the implementation it assessed.
+    if (ticket) {
+      await recordStepDecision({
+        epicId: ticket.epicId,
+        ticketId,
+        actor: "qa_test",
+        stage: "review",
+        statement: verdict.passed
+          ? `QA: acceptance criteria met for "${ticket.title}"`
+          : `QA: acceptance criteria NOT met for "${ticket.title}"`,
+        rationale: verdict.summary,
+        confidence: verdict.passed ? 1 : 0,
+        costCents: verdict.costCents,
+        auditEventId: verdictEvent.id,
+      })
+    }
     return { passed: verdict.passed, feedback: verdict.summary }
   } catch (err) {
     await reconcileSpend(role.id, held, 0) // release the hold
