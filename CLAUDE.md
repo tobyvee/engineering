@@ -2,9 +2,10 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-> **Status: the full product-development lifecycle is implemented and Waves 0–3 of the delivery
-> roadmap (14 of the 16 backlog tickets in `project/`) are complete — Wave 4 (provenance + Kappa
-> consensus) remains; it's one real `ANTHROPIC_API_KEY` away from a live autonomous run.** The pnpm + Turborepo monorepo passes `typecheck`/`lint`/`test` (94) + `build`,
+> **Status: the full product-development lifecycle is implemented and all 16 backlog tickets across
+> Waves 0–4 in `project/` are complete. It has been validated end-to-end on a live model — a ticket
+> ran shape → decompose → implement → QA → merge → deploy to `done` with real committed, QA-verified,
+> merged code, fully offline (`DELIVERY_BACKEND=local`, no GitHub).** The pnpm + Turborepo monorepo passes `typecheck`/`lint`/`test` (144) + `build`,
 > enforced by **CI** (`.github/workflows/ci.yml`) on every PR. The whole lifecycle runs as durable
 > Temporal workflows against Postgres, with **all seven roles driving a stage** behind **three human
 > approval gates** (roadmap · merge · deploy):
@@ -21,11 +22,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 >   `workflow_dispatch` deploy → poll run → `done`.
 >
 > Every transition is appended to the append-only audit log; the Mission→Goal→Epic chain gives
-> traceability; **per-role budgets are monthly-windowed and enforced by an atomic reserve→reconcile
+> traceability, and **every agent step also emits a structured `Decision` into a provenance DAG**
+> (ENG-014) traceable to the originating request (Postgres index + a PR-reviewable KB body, behind a
+> `DecisionLog` port). An optional **Kappa-style consensus** step (ENG-016, `directionConsensus`) has
+> the senior technical roles independently rate candidate implementation directions, gated by a
+> chance-corrected inter-rater agreement coefficient with a human `architecture_decision` tie-break.
+> **Per-role budgets are monthly-windowed and enforced by an atomic reserve→reconcile
 > hold** (limit−spent, concurrency-safe); a Temporal Schedule auto-starts backlog tickets. **Approval
-> gates are first-class persisted records** (roadmap · merge · deploy), resolved with the deciding
-> principal's identity. Persistence is pluggable behind `core` ports (`IssueTracker` · `KnowledgeBase`
-> · `Hierarchy` · `AuditLog`) selected by `PERSISTENCE_BACKEND` = `postgres` | `github` (GitHub =
+> gates are first-class persisted records** (roadmap · merge · deploy · architecture), resolved with
+> the deciding principal's identity. Persistence is pluggable behind `core` ports (`IssueTracker` · `KnowledgeBase`
+> · `Hierarchy` · `AuditLog` · `DecisionLog`) selected by `PERSISTENCE_BACKEND` = `postgres` | `github` (GitHub =
 > Issues + repo-docs KB + the hierarchy as native sub-issues). A React dashboard surfaces the Board,
 > Roadmap, Approvals, **Budgets**, and Audit. **The HTTP API is auth-gated** (bearer token; activates
 > when `API_AUTH_TOKEN` is set). Agent runs are sandboxed: the `cli` backend runs in a throwaway,
@@ -232,10 +238,11 @@ docker compose down      # or: pnpm docker:down
   Hono API — no second server, keeping the `core` boundary clean. (Not Next.js: its server/RSC model
   would duplicate `apps/server` and tempt direct DB access from the UI.)
 - **Persistence:** pluggable ports in `core` (`IssueTracker` · `KnowledgeBase` · `Hierarchy` ·
-  `AuditLog`) + a factory (`createPersistence`/`persistenceFromEnv`) selected by
+  `AuditLog` · `DecisionLog`) + a factory (`createPersistence`/`persistenceFromEnv`) selected by
   `PERSISTENCE_BACKEND` = `github` | `postgres`. GitHub backend = Issues + repo-docs KB (Contents
   API; Wikis have no API) + the mission→goal→epic hierarchy as native GitHub **sub-issues**;
-  audit stays in Postgres. Swapping backends never touches `core` or the workflow.
+  audit + the decision-graph index stay in Postgres (the decision **body** is written to the KB, so
+  it's PR-reviewable on the GitHub backend — ENG-014). Swapping backends never touches `core` or the workflow.
 - **Issue tracker:** **GitHub Issues/Projects** as the v1 default (Postgres backend for
   local/standalone); Linear/Jira deferred behind the same `IssueTracker` port (decided in ENG-011).
 - **CI:** GitHub Actions — typecheck/lint/test/build on every PR to `main`.

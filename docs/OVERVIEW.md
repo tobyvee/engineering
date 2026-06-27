@@ -22,23 +22,26 @@ full decisions log; this file is a snapshot inventory of what's been built.
 | 11 | `b7db668` | Wave 1 — safety + enablers | API auth + approval identity; structured outputs; CLI sandbox env scrub |
 | 12 | `543d1b8` | Wave 2 — repo context | repo provisioning (PM `git`/`gh`) + two-root workspace; repo-aware coding agents |
 | 13 | `624d363` | Wave 3 — governance | budget reset + atomic reservation; cyclic rework; first-class approvals; budget dashboard |
+| 14 | `b626983` | ENG-017 + live-run fixes | local-git delivery (offline commit/verify/`done`); worker `TEMPORAL_ADDRESS`; Haiku adaptive-thinking + output-truncation; `git` in image |
+| 15 | `4b3b75e` | Wave 4a — ENG-014 | decision log / provenance DAG: `DecisionLog` port, Postgres index + KB body, per-step emit + traversal API |
+| 16 | `65d3b23` | Wave 4b — ENG-016 | Kappa-style consensus: agreement coefficients + Borda `decide`; `directionConsensus` workflow + `architecture_decision` tie-break |
 
 ## Workspace packages & apps
 
 | Path | Role | Key contents |
 |------|------|--------------|
-| `packages/core` | Domain heart (framework-agnostic) | zod schemas (`Mission→Goal→Epic→Ticket`, budgets, approvals, audit), 7 role personas, `Worker` / `DeliveryAdapter` / `IssueTracker` / `AuditLog` interfaces, budget helpers |
-| `packages/db` | Persistence | Drizzle schema (8 FK-linked tables), `repo.ts` (tickets/audit/trace-context), client, migrations `0000`+`0001` |
-| `packages/agents` | Agent runtime | `ClaudeWorker` (api/cli backends), `proposeFileChanges`, `proposeTickets` (decomposition), `draft` (shaping artifacts), `assess` (QA), pricing, prompt builder |
-| `packages/integrations` | GitHub adapters | `GitHubDeliveryAdapter` (branch/commit/PR/checks/merge/deploy), `GitHubIssueTracker` (issues), `GitHubKnowledgeBase` (repo docs via Contents API) + factories |
-| `apps/server` | Orchestration | Hono API (`app.ts`), Temporal `client`/`worker`/`workflows`/`activities` (incl. `epicShaping` + `epicDecomposition`), shaping-stage config, heartbeat schedule |
+| `packages/core` | Domain heart (framework-agnostic) | zod schemas (`Mission→Goal→Epic→Ticket`, budgets, approvals, audit, **decisions**, **consensus**), 7 role personas, `Worker` / `DeliveryAdapter` / `IssueTracker` / `AuditLog` / `DecisionLog` interfaces, budget + **agreement/`decide`** helpers |
+| `packages/db` | Persistence | Drizzle schema (FK-linked tables incl. `decisions`), `repo.ts` (tickets/audit/trace-context/decisions), client, migrations `0000`–`0005` |
+| `packages/agents` | Agent runtime | `ClaudeWorker` (api/cli backends), `proposeFileChanges`, `proposeTickets` (decomposition), `draft` (shaping artifacts), `assess` (QA), `proposeDirections`/`rateDirections` (consensus), pricing, prompt builder |
+| `packages/integrations` | GitHub + local adapters | `GitHubDeliveryAdapter` (branch/commit/PR/checks/merge/deploy), `LocalGitDeliveryAdapter` (offline commit/verify), `GitHubIssueTracker`, `GitHubKnowledgeBase`, `KnowledgeBackedDecisionLog` + factories |
+| `apps/server` | Orchestration | Hono API (`app.ts`), Temporal `client`/`worker`/`workflows`/`activities` (incl. `epicShaping` · `epicDecomposition` · `directionConsensus`), shaping + consensus config, decision provenance, heartbeat schedule |
 | `apps/web` | Dashboard | React + Vite, TanStack Router/Query, Board/Roadmap/Approvals/Audit pages, typed API client |
 
 ## Persistence (pluggable backends)
 
-The agents' state persists through **ports in `core`** — `IssueTracker`, `KnowledgeBase`, `AuditLog`
-— assembled by a **factory** (`createPersistence` / `persistenceFromEnv`) selected by
-`PERSISTENCE_BACKEND`. Swapping backends never touches `core` or the workflow.
+The agents' state persists through **ports in `core`** — `IssueTracker`, `KnowledgeBase`, `AuditLog`,
+`Hierarchy`, `DecisionLog` — assembled by a **factory** (`createPersistence` / `persistenceFromEnv`)
+selected by `PERSISTENCE_BACKEND`. Swapping backends never touches `core` or the workflow.
 
 | Port | `postgres` backend | `github` backend |
 |------|--------------------|------------------|
@@ -46,6 +49,7 @@ The agents' state persists through **ports in `core`** — `IssueTracker`, `Know
 | Knowledge / docs (`KnowledgeBase`) | `DbKnowledgeBase` (`kb_docs`) | `GitHubKnowledgeBase` (Markdown under `docs/` via the Contents API) |
 | Goal hierarchy (`Hierarchy`) | `DbHierarchy` (rows + trace join; goal/epic authoring) | `GitHubHierarchy` (mission/goal/epic as native **sub-issues**; authoring creates + links them) |
 | Audit (`AuditLog`) | `DbAuditLog` | `DbAuditLog` (stays in Postgres — the dashboard read-model) |
+| Decisions (`DecisionLog`) | `DbDecisionLog` (append-only `decisions` DAG) | `KnowledgeBackedDecisionLog` (Postgres index + a PR-reviewable Markdown body in the KB) — ENG-014 |
 
 > GitHub Wikis have **no REST/GraphQL API** (only a `.wiki.git` repo), so the KB uses repo files —
 > the supported, reviewable equivalent.
@@ -127,7 +131,9 @@ human approval gates (roadmap · merge · deploy). Every stage is a role agent (
 | Heartbeat | Temporal Schedule auto-starts `backlog` tickets (verified: ~5s pickup) |
 | Budgets | per-role, **monthly-windowed** (lazy reset); every agent step holds cost via an atomic **reserve→reconcile** so concurrent runs can't jointly overspend (ENG-007) |
 | QA/Test | QA agent verifies acceptance criteria after implementation; a fail drives the cyclic rework loop, then blocks |
-| Approval gates | **first-class persisted records** (roadmap · merge · deploy), created when a gate is reached and resolved with the deciding principal (`decidedBy`); `/api/approvals` lists all kinds (ENG-006) |
+| Approval gates | **first-class persisted records** (roadmap · merge · deploy · architecture), created when a gate is reached and resolved with the deciding principal (`decidedBy`); `/api/approvals` lists all kinds (ENG-006) |
+| Decision provenance | every agent step (shape · decompose · implement · QA · consensus) emits a structured `Decision` into a DAG traceable to the originating request; `/api/decisions[/:id[/trace]]` (ENG-014) |
+| Direction consensus | `directionConsensus` (Phase 1, advisory behind `CONSENSUS_ENABLED`): generate 2–4 candidates → senior roles rate independently in parallel → Krippendorff/Fleiss/Kendall agreement + Borda → human `architecture_decision` tie-break (ENG-016) |
 | Agent sandboxes | two roots — throwaway **env-scrubbed** agent-state sandbox (`workspaces/`; secrets withheld, only the PM gets a scoped git/gh token, ENG-005) + persistent **working-code workspace** (`workspace/`) where coding runs against a cloned target repo (ENG-001/013); the `api` backend is tool-less but uses **structured outputs** (ENG-009) |
 | Decomposition | Lead Engineer agent breaks an epic into backlog tickets (`epicDecomposition` workflow); each ticket then runs its own lifecycle |
 | CI | GitHub Actions runs typecheck/lint/test/build on every PR to `main` (ENG-003) |
@@ -137,10 +143,12 @@ human approval gates (roadmap · merge · deploy). Every stage is a role agent (
 | Cyclic rework | QA fail → bounded re-implement-with-feedback loop, then `blocked` (ENG-008) |
 | Budget dashboard | `/api/budgets` + a web Budgets page (per-role limit/spent/remaining + unit total) (ENG-010) |
 
-## Roadmap delivered (Waves 0–3 · `project/`)
+## Roadmap delivered (Waves 0–4 · `project/`)
 
-Waves 0–3 (**14 of the 16** backlog tickets) are merged to `main`; **Wave 4** (provenance + consensus)
-remains (see `project/ROADMAP.md` for the dependency-sequenced plan):
+**All 16** backlog tickets (Waves 0–4) are merged to `main`; the lifecycle has additionally been
+validated end-to-end on a live model — a ticket reached `done` with real committed, QA-verified,
+merged code, fully offline (`DELIVERY_BACKEND=local`). See `project/ROADMAP.md` for the
+dependency-sequenced plan:
 
 - **Wave 0 — foundations:** ENG-003 CI · ENG-002 Temporal workflow tests · ENG-011/012/015 decisions
   (GitHub Issues default · A2A monitor-only · SurrealDB no-go).
@@ -150,8 +158,14 @@ remains (see `project/ROADMAP.md` for the dependency-sequenced plan):
   repo-aware coding agents.
 - **Wave 3 — governance / observability:** ENG-007 budget reset + reservation · ENG-006 first-class
   approvals · ENG-010 budget dashboard · ENG-008 cyclic rework.
-- **Wave 4 — provenance + consensus (remaining):** ENG-014 decision log / provenance tree · ENG-016
-  Kappa-style consensus (PRD-001).
+- **Wave 4 — provenance + consensus:** ENG-014 decision log / provenance DAG (Postgres index + KB
+  body behind a `DecisionLog` port; every agent step emits a decision traceable to the originating
+  request) · ENG-016 Kappa-style consensus (PRD-001, Phase 1 — advisory `directionConsensus`:
+  candidate generation → parallel independent raters → Krippendorff/Fleiss/Kendall agreement + Borda →
+  human `architecture_decision` tie-break).
+- **Post-roadmap (live-run fixes):** ENG-017 local-git delivery (commit/verify/`done` offline) plus
+  three deployment bugs found by the live run — worker `TEMPORAL_ADDRESS`, Haiku adaptive-thinking
+  guard + non-streaming output truncation, and `git` in the worker image / no-op deploy success.
 
 ## Not yet built (honest gaps)
 
