@@ -1,4 +1,5 @@
 import type { AuditLog } from "./audit"
+import type { DecisionLog } from "./decision"
 import type { Hierarchy } from "./hierarchy"
 import type { KnowledgeBase } from "./knowledge"
 import type { IssueTracker } from "./tracker"
@@ -16,4 +17,6 @@ export interface Persistence {
   knowledge: KnowledgeBase
   hierarchy: Hierarchy
   audit: AuditLog
+  /** Decision-provenance graph (ENG-014) — a linked layer over the audit log + hierarchy. */
+  decisions: DecisionLog
 }

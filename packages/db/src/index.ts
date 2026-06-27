@@ -1,5 +1,6 @@
 export { DbAuditLog } from "./audit-log"
 export { db } from "./client"
+export { DbDecisionLog } from "./decision-log"
 export { DbHierarchy } from "./hierarchy"
 export { DbKnowledgeBase } from "./knowledge"
 export * from "./repo"

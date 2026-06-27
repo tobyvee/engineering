@@ -1,4 +1,4 @@
-import { integer, jsonb, pgEnum, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core"
+import { integer, jsonb, pgEnum, pgTable, real, text, timestamp, uuid } from "drizzle-orm/pg-core"
 
 /**
  * Postgres schema mirroring `@eng/core`. Goal traceability (invariant #1) is enforced at the DB
@@ -135,4 +135,34 @@ export const auditLog = pgTable("audit_log", {
   kind: text("kind").notNull(),
   ticketId: uuid("ticket_id").references(() => tickets.id),
   payload: jsonb("payload").$type<Record<string, unknown>>().notNull().default({}),
+})
+
+/**
+ * Decision-provenance graph (ENG-014). Append-only: inserts only, never UPDATE/DELETE. A DAG —
+ * `parentDecisionIds` holds the set of causal-parent edges; `rootRequestId` is the trace root every
+ * chain reaches (not FK'd: the root node's `rootRequestId` is its own id). Refs into the hierarchy
+ * spine and back to the audit-log event substrate (which it references, never copies — invariant #2).
+ */
+export const decisions = pgTable("decisions", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  rootRequestId: uuid("root_request_id").notNull(),
+  parentDecisionIds: jsonb("parent_decision_ids").$type<string[]>().notNull().default([]),
+  missionId: uuid("mission_id").references(() => missions.id),
+  goalId: uuid("goal_id").references(() => goals.id),
+  epicId: uuid("epic_id").references(() => epics.id),
+  ticketId: uuid("ticket_id").references(() => tickets.id),
+  actor: text("actor").notNull(),
+  stage: lifecycleStage("stage").notNull(),
+  statement: text("statement").notNull(),
+  rationale: text("rationale").notNull().default(""),
+  alternatives: jsonb("alternatives")
+    .$type<{ option: string; rejectedBecause: string }[]>()
+    .notNull()
+    .default([]),
+  inputs: jsonb("inputs").$type<string[]>().notNull().default([]),
+  outputs: jsonb("outputs").$type<string[]>().notNull().default([]),
+  confidence: real("confidence"),
+  costCents: real("cost_cents"),
+  auditEventId: uuid("audit_event_id").references(() => auditLog.id),
+  at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
 })

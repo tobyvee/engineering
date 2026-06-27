@@ -1,3 +1,4 @@
+export { KnowledgeBackedDecisionLog, renderDecisionDoc } from "./decision-log"
 export {
   createGitHubDelivery,
   createGitHubHierarchy,

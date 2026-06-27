@@ -1,9 +1,10 @@
 import type { Persistence, PersistenceBackend } from "@eng/core"
-import { DbAuditLog, DbHierarchy, DbIssueTracker, DbKnowledgeBase } from "@eng/db"
+import { DbAuditLog, DbDecisionLog, DbHierarchy, DbIssueTracker, DbKnowledgeBase } from "@eng/db"
 import {
   createGitHubHierarchy,
   createGitHubIssueTracker,
   createGitHubKnowledgeBase,
+  KnowledgeBackedDecisionLog,
 } from "@eng/integrations"
 
 function githubConfig(): { token: string; owner: string; repo: string } | null {
@@ -20,20 +21,26 @@ function githubConfig(): { token: string; owner: string; repo: string } | null {
  */
 export function createPersistence(backend: PersistenceBackend): Persistence {
   const audit = new DbAuditLog()
+  // The decision graph (ENG-014) indexes in Postgres — like the audit log, it's the queryable
+  // substrate — and writes a human-readable body to whichever KB the backend uses (PR-reviewable
+  // files on the GitHub backend).
   if (backend === "github") {
     const gh = githubConfig()
     if (gh) {
       const hierarchy = createGitHubHierarchy(gh)
       const tracker = createGitHubIssueTracker(gh, hierarchy)
       const knowledge = createGitHubKnowledgeBase({ ...gh, prefix: process.env.GITHUB_DOCS_PREFIX })
-      return { tracker, knowledge, hierarchy, audit }
+      const decisions = new KnowledgeBackedDecisionLog(new DbDecisionLog(), knowledge)
+      return { tracker, knowledge, hierarchy, audit, decisions }
     }
   }
+  const knowledge = new DbKnowledgeBase()
   return {
     tracker: new DbIssueTracker(),
-    knowledge: new DbKnowledgeBase(),
+    knowledge,
     hierarchy: new DbHierarchy(),
     audit,
+    decisions: new KnowledgeBackedDecisionLog(new DbDecisionLog(), knowledge),
   }
 }
 
