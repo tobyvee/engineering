@@ -33,6 +33,12 @@ describe("LocalGitDeliveryAdapter", () => {
     expect(onMain.map((f) => f.path).sort()).toEqual(["README.md", "src/index.ts"])
   })
 
+  it("reports a no-op deploy as success so the ship step doesn't poll forever", async () => {
+    await adapter.dispatchWorkflow()
+    const run = await adapter.deploymentRunAfter()
+    expect(run?.state).toBe("success")
+  })
+
   it("serializes concurrent ticket commits without cross-contamination", async () => {
     await Promise.all([
       (async () => {

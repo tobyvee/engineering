@@ -122,7 +122,8 @@ export class LocalGitDeliveryAdapter implements DeliveryAdapter {
     })
   }
 
-  // Deploy is a no-op locally (the deploy workflow stays unconfigured); present to satisfy the port.
+  // Deploy is a no-op locally (there's no deploy target). The methods report a trivially-successful
+  // run so the ship step completes instead of polling `pending` forever — there is nothing to wait on.
   dispatchWorkflow(): Promise<void> {
     return Promise.resolve()
   }
@@ -130,7 +131,7 @@ export class LocalGitDeliveryAdapter implements DeliveryAdapter {
     return Promise.resolve(null)
   }
   deploymentRunAfter(): Promise<DeploymentRun | null> {
-    return Promise.resolve(null)
+    return Promise.resolve({ id: 0, url: "local", state: "success" })
   }
 }
 
