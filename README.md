@@ -2,6 +2,7 @@
 
 **An autonomous engineering-management & delivery tool for a single cross-functional engineering org unit** — a persistent org of role-based AI agents that takes work from a one-line epic all the way to a shipped change, with the human as the accountable lead at the approval gates.
 
+[![CI](https://github.com/tobyvee/engineering/actions/workflows/ci.yml/badge.svg)](https://github.com/tobyvee/engineering/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
 ![TypeScript](https://img.shields.io/badge/TypeScript-strict%2C%20ESM-3178c6)
 ![Temporal](https://img.shields.io/badge/durable-Temporal-000)
@@ -120,6 +121,16 @@ pnpm test         # vitest
 pnpm db:generate  # drizzle-kit generate
 pnpm db:migrate   # drizzle-kit migrate
 ```
+
+## Continuous integration
+
+[`.github/workflows/ci.yml`](./.github/workflows/ci.yml) runs `typecheck` · `lint` · `test` · `build`
+on every pull request to `main` (and on pushes to `main`), using the Node version pinned in `.nvmrc`
+with a frozen lockfile and pnpm + Turborepo caching. Unit tests need no live services.
+
+To make a failing check **block merges**, enable branch protection on `main`
+(GitHub → Settings → Branches → Add rule) and mark the **`typecheck · lint · test · build`** status
+check as required. This is a one-time repo setting and can't be committed from the codebase.
 
 ## Key invariants
 
