@@ -22,6 +22,20 @@
       "when": 1782100362993,
       "tag": "0002_absent_vision",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1782529323974,
+      "tag": "0003_narrow_surge",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1782529753673,
+      "tag": "0004_tidy_next_avengers",
+      "breakpoints": true
     }
   ]
 }

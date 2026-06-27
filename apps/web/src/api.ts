@@ -1,10 +1,11 @@
-import type { AuditEvent, HierarchyNode, Ticket } from "@eng/core"
+import type { Approval, AuditEvent, HierarchyNode, Ticket } from "@eng/core"
 
-/** A human gate awaiting sign-off (derived server-side from the audit log). */
-export interface PendingApproval {
-  epicId: string
-  kind: string
-  at: string
+/** Per-scope budget summary for the dashboard (ENG-010). */
+export interface BudgetSummary {
+  scope: string
+  limitCents: number
+  spentCents: number
+  remainingCents: number
 }
 
 async function getJson<T>(path: string): Promise<T> {
@@ -27,8 +28,8 @@ async function postJson<T>(path: string, body?: unknown): Promise<T> {
 export const api = {
   health: () => getJson<{ ok: boolean }>("/health"),
   tickets: () => getJson<{ tickets: Ticket[] }>("/api/tickets").then((r) => r.tickets),
-  approvals: () =>
-    getJson<{ approvals: PendingApproval[] }>("/api/approvals").then((r) => r.approvals),
+  approvals: () => getJson<{ approvals: Approval[] }>("/api/approvals").then((r) => r.approvals),
+  budgets: () => getJson<{ budgets: BudgetSummary[] }>("/api/budgets").then((r) => r.budgets),
   audit: () => getJson<{ events: AuditEvent[] }>("/api/audit").then((r) => r.events),
   goals: () => getJson<{ goals: HierarchyNode[] }>("/api/goals").then((r) => r.goals),
   epics: (goalId?: string) =>

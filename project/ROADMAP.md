@@ -40,11 +40,13 @@ high-leverage enablers forward even when labelled P1/P2.
 - **ENG-001** ✅ — `WorkerInput.workdir`; CLI backend runs in the cloned repo cwd so agents read/edit
   real source. (Deferred: API-backend file-context injection.)
 
-### Wave 3 — Governance / observability
-- **ENG-007** — Budget model (reset + reservation). Do first in this wave — gates 010 and 008.
-- **ENG-006** — First-class approvals. Builds on ENG-004's identity.
-- **ENG-010** — Budget/cost dashboard. Needs ENG-007.
-- **ENG-008** — Cyclic rework routing. Needs ENG-007 + ENG-002.
+### Wave 3 — Governance / observability — ✅ complete (2026-06-27)
+- **ENG-007** ✅ — Monthly reset (`period_start`, lazy rollover) + atomic reserve/reconcile across all
+  agent activities.
+- **ENG-006** ✅ — First-class persisted approvals (added `epic_id`); pending records per gate,
+  resolved with `decidedBy`; `/api/approvals` covers roadmap · merge · deploy.
+- **ENG-010** ✅ — `/api/budgets` + web Budgets page (per-role limit/spent/remaining + total).
+- **ENG-008** ✅ — Bounded implement→review→QA rework loop with QA feedback, then blocked.
 
 ### Wave 4 — Provenance + consensus
 - **ENG-014** — Decision log / provenance tree. Needs ENG-009; build on the Postgres+KB default behind

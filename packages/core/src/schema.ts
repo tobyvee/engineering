@@ -113,6 +113,7 @@ export const Approval = z.object({
   id,
   kind: ApprovalKind,
   ticketId: id.nullable(),
+  epicId: id.nullable(),
   requestedByRole: RoleId,
   status: ApprovalStatus,
   decidedBy: z.string().nullable(),

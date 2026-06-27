@@ -44,7 +44,7 @@ function makeActivities(overrides: Record<string, unknown> = {}) {
       url: "http://pr/1",
       branch: "ticket/t",
     })),
-    verifyTicket: vi.fn(async (_id: string) => true),
+    verifyTicket: vi.fn(async (_id: string) => ({ passed: true, feedback: "" })),
     checkDeliveryStatus: vi.fn(async (_pr: unknown) => "success"),
     mergeDelivery: vi.fn(async (_id: string, _pr: unknown) => true),
     startDeploy: vi.fn(async (_id: string) => 42),
@@ -55,6 +55,7 @@ function makeActivities(overrides: Record<string, unknown> = {}) {
     runShapingStage: vi.fn(async (_epicId: string, _stageKey: string) => {}),
     requestRoadmapSignoff: vi.fn(async (_epicId: string) => {}),
     recordRoadmapApproval: vi.fn(async (_epicId: string) => {}),
+    requestApproval: vi.fn(async (_kind: string, _ticketId: string) => {}),
     ...overrides,
   }
 }
@@ -113,20 +114,46 @@ describe("ticketLifecycle", () => {
     expect(acts.transitionTicket).toHaveBeenCalledWith("t1", "done")
   }, 30_000)
 
-  it("blocks the ticket when QA fails (before any gate)", async () => {
-    const acts = makeActivities({ verifyTicket: vi.fn(async (_id: string) => false) })
+  it("reworks up to the attempt limit on persistent QA failure, then blocks", async () => {
+    const acts = makeActivities({
+      verifyTicket: vi.fn(async (_id: string) => ({ passed: false, feedback: "still broken" })),
+    })
     await withWorker(acts, async () => {
       const handle = await env.client.workflow.start(ticketLifecycle, {
         taskQueue: TQ,
         workflowId: nextId("ticket"),
         args: ["t1"],
       })
-      await handle.result() // returns without any signal — QA fail short-circuits
+      await handle.result() // no signal needed — exhausts rework attempts then blocks
     })
 
+    expect(acts.implementTicket).toHaveBeenCalledTimes(2) // bounced back and retried (ENG-008)
     expect(acts.transitionTicket).toHaveBeenCalledWith("t1", "blocked")
     expect(acts.mergeDelivery).not.toHaveBeenCalled()
     expect(acts.transitionTicket).not.toHaveBeenCalledWith("t1", "done")
+  }, 30_000)
+
+  it("reworks once with the QA feedback, then reaches done on a pass", async () => {
+    const verifyTicket = vi
+      .fn()
+      .mockResolvedValueOnce({ passed: false, feedback: "add a test" })
+      .mockResolvedValue({ passed: true, feedback: "" })
+    const acts = makeActivities({ verifyTicket })
+    await withWorker(acts, async () => {
+      const handle = await env.client.workflow.start(ticketLifecycle, {
+        taskQueue: TQ,
+        workflowId: nextId("ticket"),
+        args: ["t1"],
+      })
+      await handle.signal(approveSignal, "merge")
+      await handle.signal(approveSignal, "deploy")
+      await handle.result()
+    })
+
+    expect(acts.implementTicket).toHaveBeenCalledTimes(2) // reworked once
+    expect(acts.implementTicket).toHaveBeenLastCalledWith("t1", "add a test") // fed the feedback
+    expect(acts.transitionTicket).toHaveBeenCalledWith("t1", "done")
+    expect(acts.transitionTicket).not.toHaveBeenCalledWith("t1", "blocked")
   }, 30_000)
 
   it("blocks the ticket when the merge fails", async () => {

@@ -12,6 +12,7 @@ export {
   proposeTickets,
 } from "./decompose"
 export { type DraftedArtifact, type DraftInput, draft } from "./draft"
+export { estimateRunCostCents } from "./pricing"
 export { DEFAULT_MODEL } from "./prompt"
 export {
   isParseableJson,

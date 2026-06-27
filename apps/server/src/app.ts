@@ -1,3 +1,4 @@
+import { listBudgets, listPendingApprovals, resolveApproval } from "@eng/db"
 import { Hono } from "hono"
 import { type AppEnv, authMiddleware } from "./auth"
 import { persistenceFromEnv } from "./persistence"
@@ -29,27 +30,10 @@ app.use("/api/*", authMiddleware())
 
 app.get("/api/tickets", async (c) => c.json({ tickets: await persistence.tracker.list() }))
 app.get("/api/audit", async (c) => c.json({ events: await persistence.audit.query() }))
-// Pending human gates, derived from the audit log. A roadmap sign-off is pending when the latest
-// roadmap-lifecycle event for an epic is `roadmap_requested` (not yet approved/decomposed).
-app.get("/api/approvals", async (c) => {
-  const events = await persistence.audit.query()
-  const seen = new Set<string>()
-  const pending: { epicId: string; kind: string; at: string }[] = []
-  for (const e of events) {
-    const epicId = typeof e.payload?.epicId === "string" ? (e.payload.epicId as string) : null
-    if (!epicId || seen.has(epicId)) continue
-    if (
-      e.kind === "roadmap_requested" ||
-      e.kind === "roadmap_approved" ||
-      e.kind === "epic_decomposed" ||
-      e.kind === "decomposition_skipped"
-    ) {
-      seen.add(epicId)
-      if (e.kind === "roadmap_requested") pending.push({ epicId, kind: "roadmap", at: e.at })
-    }
-  }
-  return c.json({ approvals: pending })
-})
+// Pending human gates as first-class records (ENG-006): roadmap · pr_merge · deploy.
+app.get("/api/approvals", async (c) => c.json({ approvals: await listPendingApprovals() }))
+// Per-role budget/cost view for the dashboard (ENG-010).
+app.get("/api/budgets", async (c) => c.json({ budgets: await listBudgets() }))
 
 // Goal hierarchy authoring (through the persistence port, so the backend is swappable). Lets the
 // human/PM decompose work under multiple goals + epics; tickets then target a chosen epic.
@@ -111,7 +95,8 @@ app.post("/api/epics/:id/approve-roadmap", async (c) => {
   const id = c.req.param("id")
   const signaled = await approveRoadmap(id)
   const by = c.get("actor")
-  // Record who released the gate (ENG-004) — append-only, so the audit log carries the approver.
+  // Resolve the first-class approval record (ENG-006) + audit who released the gate (ENG-004).
+  await resolveApproval({ kind: "roadmap", epicId: id, decidedBy: by })
   await persistence.audit.append({
     actor: "human",
     kind: "approval_decided",
@@ -158,7 +143,12 @@ app.post("/api/tickets/:id/approve", async (c) => {
   const gate = body.gate === "deploy" ? "deploy" : "merge"
   await approveTicket(id, gate)
   const by = c.get("actor")
-  // Record who released the gate (ENG-004).
+  // Resolve the first-class approval record (ENG-006) + audit who released the gate (ENG-004).
+  await resolveApproval({
+    kind: gate === "deploy" ? "deploy" : "pr_merge",
+    ticketId: id,
+    decidedBy: by,
+  })
   await persistence.audit.append({
     actor: "human",
     kind: "approval_decided",

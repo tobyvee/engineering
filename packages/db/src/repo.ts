@@ -1,14 +1,18 @@
 import {
+  type Approval,
+  type ApprovalKind,
   type AuditEvent,
   type NewAuditEvent,
   type NewTicket,
+  periodExpired,
   ROLES,
+  type RoleId,
   type Ticket,
   type TicketStatus,
 } from "@eng/core"
-import { desc, eq, sql } from "drizzle-orm"
+import { and, desc, eq, sql } from "drizzle-orm"
 import { db } from "./client"
-import { auditLog, budgets, epics, goals, missions, tickets, units } from "./schema"
+import { approvals, auditLog, budgets, epics, goals, missions, tickets, units } from "./schema"
 
 function firstOrThrow<T>(rows: T[], what: string): T {
   const row = rows[0]
@@ -272,8 +276,27 @@ export async function listAudit(): Promise<AuditEvent[]> {
   return rows.map(toAudit)
 }
 
+/** Reset a scope's spend if its budget window has rolled over (ENG-007). Lazy — called on read/reserve
+ *  so `monthlyBudgetCents` is a real monthly allowance, not a lifetime total that only grows. */
+async function rolloverIfExpired(scope: string): Promise<void> {
+  const row = (
+    await db
+      .select({ periodStart: budgets.periodStart })
+      .from(budgets)
+      .where(eq(budgets.scope, scope))
+      .limit(1)
+  )[0]
+  if (row && periodExpired(row.periodStart.toISOString(), new Date())) {
+    await db
+      .update(budgets)
+      .set({ spentCents: 0, periodStart: new Date() })
+      .where(eq(budgets.scope, scope))
+  }
+}
+
 /** Remaining budget (cents) for a scope (role id or "unit"); null if no budget row exists. */
 export async function getBudgetRemaining(scope: string): Promise<number | null> {
+  await rolloverIfExpired(scope)
   const row = (
     await db
       .select({ limitCents: budgets.limitCents, spentCents: budgets.spentCents })
@@ -292,4 +315,127 @@ export async function addSpend(scope: string, cents: number): Promise<void> {
     .update(budgets)
     .set({ spentCents: sql`${budgets.spentCents} + ${c}` })
     .where(eq(budgets.scope, scope))
+}
+
+/**
+ * Atomically reserve `cents` against a scope's budget (ENG-007). Returns the held amount on success,
+ * `null` if the reservation would exceed the limit (caller skips the run), or `0` when no budget row
+ * exists (run proceeds unmetered). The conditional UPDATE serializes concurrent reservations so they
+ * cannot jointly exceed the limit — closing the read-then-spend TOCTOU.
+ */
+export async function reserveBudget(scope: string, cents: number): Promise<number | null> {
+  await rolloverIfExpired(scope)
+  const c = Math.max(0, Math.round(cents))
+  const exists = (
+    await db.select({ id: budgets.id }).from(budgets).where(eq(budgets.scope, scope)).limit(1)
+  )[0]
+  if (!exists) return 0
+  if (c === 0) return 0
+  const updated = await db
+    .update(budgets)
+    .set({ spentCents: sql`${budgets.spentCents} + ${c}` })
+    .where(
+      and(eq(budgets.scope, scope), sql`${budgets.spentCents} + ${c} <= ${budgets.limitCents}`),
+    )
+    .returning({ id: budgets.id })
+  return updated.length > 0 ? c : null
+}
+
+/** Settle a reservation to actual spend (ENG-007): adjust the held amount by (actual − held), ≥ 0. */
+export async function reconcileSpend(
+  scope: string,
+  heldCents: number,
+  actualCents: number,
+): Promise<void> {
+  const delta = Math.round(actualCents) - Math.round(heldCents)
+  if (delta === 0) return
+  await db
+    .update(budgets)
+    .set({ spentCents: sql`GREATEST(0, ${budgets.spentCents} + ${delta})` })
+    .where(eq(budgets.scope, scope))
+}
+
+// --- Approvals (first-class gate records, ENG-006) ---------------------------
+
+function toApproval(row: typeof approvals.$inferSelect): Approval {
+  return {
+    id: row.id,
+    kind: row.kind,
+    ticketId: row.ticketId,
+    epicId: row.epicId,
+    requestedByRole: row.requestedByRole,
+    status: row.status,
+    decidedBy: row.decidedBy,
+    createdAt: row.createdAt.toISOString(),
+    decidedAt: row.decidedAt ? row.decidedAt.toISOString() : null,
+  }
+}
+
+/** Create a pending approval when a gate is reached (ENG-006). */
+export async function createApproval(input: {
+  kind: ApprovalKind
+  ticketId?: string | null
+  epicId?: string | null
+  requestedByRole: RoleId
+}): Promise<Approval> {
+  const row = firstOrThrow(
+    await db
+      .insert(approvals)
+      .values({
+        kind: input.kind,
+        ticketId: input.ticketId ?? null,
+        epicId: input.epicId ?? null,
+        requestedByRole: input.requestedByRole,
+      })
+      .returning(),
+    "approval",
+  )
+  return toApproval(row)
+}
+
+/** Resolve the matching pending approval, recording who decided it (ENG-006). */
+export async function resolveApproval(input: {
+  kind: ApprovalKind
+  ticketId?: string | null
+  epicId?: string | null
+  decidedBy: string
+  status?: "approved" | "rejected"
+}): Promise<void> {
+  const conds = [eq(approvals.kind, input.kind), eq(approvals.status, "pending")]
+  if (input.ticketId) conds.push(eq(approvals.ticketId, input.ticketId))
+  if (input.epicId) conds.push(eq(approvals.epicId, input.epicId))
+  await db
+    .update(approvals)
+    .set({ status: input.status ?? "approved", decidedBy: input.decidedBy, decidedAt: new Date() })
+    .where(and(...conds))
+}
+
+/** Pending approvals across all gate kinds (roadmap · merge · deploy), newest first (ENG-006). */
+export async function listPendingApprovals(): Promise<Approval[]> {
+  const rows = await db
+    .select()
+    .from(approvals)
+    .where(eq(approvals.status, "pending"))
+    .orderBy(desc(approvals.createdAt))
+  return rows.map(toApproval)
+}
+
+/** Per-scope budgets with remaining, for the dashboard (ENG-010). */
+export interface BudgetSummary {
+  scope: string
+  limitCents: number
+  spentCents: number
+  remainingCents: number
+}
+
+export async function listBudgets(): Promise<BudgetSummary[]> {
+  const rows = await db
+    .select({
+      scope: budgets.scope,
+      limitCents: budgets.limitCents,
+      spentCents: budgets.spentCents,
+    })
+    .from(budgets)
+    .orderBy(budgets.scope)
+  return rows.map((r) => ({ ...r, remainingCents: Math.max(0, r.limitCents - r.spentCents) }))
 }

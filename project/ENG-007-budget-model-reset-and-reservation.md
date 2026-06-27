@@ -1,10 +1,19 @@
 # ENG-007 — Fix the budget model (reset window + reservation)
 
-- **Status:** backlog
+- **Status:** done
 - **Priority:** P2 (Medium)
 - **Stage:** implementation
 - **Assignee role:** staff_engineer (with lead_system_design input)
 - **Area:** packages/db
+
+> **Outcome (Wave 3):** **Monthly reset** — `period_start` column (migration `0003`) + lazy
+> `rolloverIfExpired` inside `getBudgetRemaining`, so `monthlyBudgetCents` is a real monthly window
+> (auto-applies to every activity). **Reservation** — atomic `reserveBudget` (conditional UPDATE that
+> can't exceed the limit) + `reconcileSpend` (settle hold → actual); `estimateRunCostCents` sizes the
+> worst-case hold; all four agent activities now reserve→run→reconcile (release on failure/skip on
+> exhaustion), closing the read-then-spend TOCTOU. Pure helpers `periodExpired` / `canReserve` unit
+> tested. (DB atomicity itself isn't unit-tested — no live DB in CI — consistent with the rest of
+> `repo.ts`.)
 
 ## Problem
 
